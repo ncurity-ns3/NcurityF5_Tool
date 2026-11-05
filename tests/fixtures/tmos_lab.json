@@ -1,0 +1,21 @@
+{
+  "common": {
+    "tmos": {
+      "_meta": {"hostname": "lab-bigip-01"},
+      "uptime": {"bash_stdout": "up 10 days"},
+      "backup_action": {"performed": false, "skipped": true},
+      "failover": {
+        "bash_stdout": "Status: ACTIVE",
+        "_source": "bash"
+      }
+    }
+  },
+  "ltm": {
+    "pools": {
+      "items": [{"name": "pool_lab_http", "availabilityState": "available"}]
+    },
+    "virtual_servers": {"items": []},
+    "nodes": {"items": []}
+  },
+  "failover": {"status": "ACTIVE"}
+}

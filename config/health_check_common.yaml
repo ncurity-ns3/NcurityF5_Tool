@@ -1,0 +1,105 @@
+# Common periodic inspection (정기점검 Common)
+# iSeries: TMOS only | rSeries: HW=F5OS, SW/logical=TMOS
+
+version: 1
+preset: common
+
+items:
+  - id: uptime
+    name: Uptime
+    layer: tmos
+    criteria: "TMOS tenant uptime — 365일 초과 warn"
+    tmos_bash: "uptime"
+
+  - id: power
+    name: 장비 전원 상태
+    layer: both
+    criteria: "전원/PSU 상태 up"
+    tmos_rest: "/tm/sys/hardware"
+    f5os_hint: "openconfig-platform PSU stats"
+
+  - id: temperature
+    name: 장비 온도
+    layer: both
+    criteria: "48°C 미만"
+    tmos_rest: "/tm/sys/hardware"
+    f5os_hint: "f5-platform:temperature"
+
+  - id: interface
+    name: 인터페이스 상태
+    layer: both
+    criteria: "VLAN 사용 IF — up/down 개수 (미확인=down)"
+    tmos_bash: "tmsh list net vlan; tmsh show net interface"
+
+  - id: ntp
+    name: NTP 상태
+    layer: both
+    criteria: "ntpq -np — * 동기 peer"
+    tmos_bash: "ntpq -np"
+    f5os_hint: "system ntp servers"
+
+  - id: clock
+    name: System Time
+    layer: both
+    criteria: "date vs clock 시각 차이 없음"
+    tmos_bash: "date; clock"
+
+  - id: disk
+    name: Disk 사용량
+    layer: both
+    criteria: "/var, /shared df 사용률 80% 미만"
+    tmos_bash: "df -h"
+
+  - id: daemons
+    name: 주요 서비스 데몬
+    layer: tmos
+    criteria: "tmm, bigd, mcpd running"
+    tmos_rest: "/tm/sys/service"
+
+  - id: cpu
+    name: CPU Usage
+    layer: tmos
+    criteria: "Cur/Avg/Max % — Max 80% warn"
+    tmos_bash: "tmsh show sys performance"
+
+  - id: memory
+    name: Memory Usage
+    layer: tmos
+    criteria: "TMM Memory Cur/Avg/Max % — Max 80% warn"
+    tmos_bash: "tmsh show sys performance"
+
+  - id: concurrent_connections
+    name: Concurrent Connection
+    layer: tmos
+    criteria: "Active Connections Cur/Avg/Max"
+    tmos_bash: "tmsh show sys performance"
+
+  - id: new_connections
+    name: New Connection
+    layer: tmos
+    criteria: "Total New Connections Client Cur/Avg/Max"
+    tmos_bash: "tmsh show sys performance"
+
+  - id: throughput
+    name: Throughput
+    layer: tmos
+    criteria: "Throughput(bits) Service Cur/Avg/Max"
+    tmos_bash: "tmsh show sys performance"
+
+  - id: ssl_cert
+    name: SSL 인증서 만료
+    layer: tmos
+    criteria: "check-cert — expired fail, will expire warn"
+    tmos_bash: "tmsh run /sys crypto check-cert | grep expire"
+
+  - id: ha_status
+    name: HA 상태
+    layer: tmos
+    criteria: "Standalone / Active / Standby / Force Offline"
+    tmos_bash: "tmsh show sys failover; tmsh show cm failover-status"
+
+  - id: policy_backup
+    name: 정책 백업 (UCS)
+    layer: tmos
+    criteria: "점검 시 tmsh save sys ucs 수행 (GUI 옵션)"
+    tmos_bash: "rm /var/local/ucs/*.ucs; tmsh save sys ucs $(date +%y%m%d)-$HOSTNAME"

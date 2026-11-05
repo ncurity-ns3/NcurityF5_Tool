@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>APM Access Policy Viewer</title>
+  <link rel="icon" type="image/png" href="/app-icon.png" />
+  <link rel="shortcut icon" href="/app-icon.ico" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img class="brand-icon" src="/brand-mark.png" alt="" />APM Access Policy Viewer</div>
+    <form id="upload-form" class="upload">
+      <label class="file-btn">
+        파일 업로드
+        <input id="file" type="file" name="file" accept=".qkview,.ucs,.conf,.tar,.gz,.tgz,.zip,text/plain" />
+      </label>
+      <span id="source-label" class="source">qkview / ucs / bigip.conf</span>
+    </form>
+    <input id="filter" type="search" placeholder="프로필 검색" />
+  </header>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <section class="sidebar-section">
+        <h2>Access Profiles</h2>
+        <ul id="profile-list"></ul>
+      </section>
+    </aside>
+    <div class="sidebar-resizer" id="sidebar-resizer" title="사이드바 너비 조절"></div>
+    <main class="main">
+      <div id="status" class="status">qkview를 올리면 Access Policy 흐름도가 생성됩니다.</div>
+      <div class="workspace">
+        <div class="canvas-frame" title="Ctrl + 스크롤로 확대/축소">
+          <div id="zoom-hud" class="zoom-hud" aria-hidden="true">
+            <span id="zoom-pct">100%</span>
+            <button type="button" id="zoom-out" title="축소" aria-label="축소">−</button>
+            <button type="button" id="zoom-in" title="확대" aria-label="확대">+</button>
+            <button type="button" id="zoom-reset" title="원래 크기">초기화</button>
+          </div>
+          <div id="dropzone" class="dropzone">
+            <strong>qkview 파일을 여기에 놓으세요</strong>
+            <span>또는 위 버튼으로 .qkview / .ucs / bigip.conf 선택</span>
+          </div>
+          <section id="canvas-wrap">
+            <div id="canvas-scaler">
+              <div id="canvas-scene">
+                <svg id="canvas"></svg>
+                <div id="macro-stack"></div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <div id="detail-resizer" class="detail-resizer hidden" title="상세 패널 너비 조절"></div>
+        <aside id="detail" class="detail hidden">
+          <div class="detail-head">
+            <h3 id="detail-title"></h3>
+            <button id="detail-close" type="button">닫기</button>
+          </div>
+          <div id="detail-body" class="detail-body"></div>
+        </aside>
+      </div>
+    </main>
+  </div>
+  <script src="/graph-layout.js"></script>
+  <script src="/vpe.js"></script>
+</body>
+</html>

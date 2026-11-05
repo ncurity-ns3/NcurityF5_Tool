@@ -1,0 +1,62 @@
+# OS Upgrade — Post-check snapshot profile (Pre superset + 사후 검증)
+
+version: 1
+phase: post
+preset: os_upgrade_post
+
+collect:
+  categories:
+    - common
+    - ltm
+  perform_ucs_backup: false
+
+items:
+  - id: sys_version
+    name: 현재 버전
+    layer: tmos
+    criteria: "Target version 도달 여부 (job_meta.target_version 과 비교)"
+
+  - id: ha_status
+    name: HA 상태
+    layer: tmos
+    criteria: "Pre 대비 worse 이면 fail (Active→Offline 등)"
+
+  - id: disk
+    name: 디스크 여유
+    layer: both
+    criteria: "Pre 대비 사용률 +10%p 이면 warn"
+
+  - id: ntp
+    name: NTP 동기
+    layer: both
+    criteria: "동기 peer 유지"
+
+  - id: policy_backup
+    name: Config 백업 (UCS)
+    layer: tmos
+    criteria: "Post에서 UCS 재확인 (save 미실행)"
+
+  - id: pool_availability
+    name: Pool/VS 가용성 요약
+    layer: tmos
+    criteria: "down 개수 Pre 대비 증가 시 fail"
+
+  - id: interface
+    name: 인터페이스·Self-IP
+    layer: both
+    criteria: "Pre 대비 down IF 증가 시 fail"
+
+  - id: daemons
+    name: 주요 서비스
+    layer: tmos
+    criteria: "tmm, bigd, mcpd running"
+
+  - id: target_version
+    name: Target version 검증
+    layer: meta
+    criteria: "수동 입력 target_version 과 수집 버전 일치 (diff 엔진)"
+
+  - id: f5os_connectivity
+    name: rSeries F5OS 연결
+    layer: f5os
+    criteria: "Post 재수집 — F5OS + tenant 정상"

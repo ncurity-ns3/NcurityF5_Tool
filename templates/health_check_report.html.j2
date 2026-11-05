@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"/>
+  <title>health check — {{ site_name }}</title>
+  <style>
+    body { font-family: "Segoe UI", sans-serif; margin: 24px; color: #222; }
+    h1 { color: #0b5cab; border-bottom: 2px solid #0b5cab; padding-bottom: 8px; }
+    .meta { background: #f4f6f8; padding: 12px; border-radius: 6px; margin-bottom: 20px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 12px; table-layout: fixed; }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 10px;
+      text-align: left;
+      vertical-align: top;
+      word-wrap: break-word;
+      overflow-wrap: anywhere;
+      white-space: normal;
+      line-height: 1.35;
+    }
+    th { background: #e8eef5; }
+    table.checklist th:nth-child(1) { width: 14%; }
+    table.checklist th:nth-child(2) { width: 7%; }
+    table.checklist th:nth-child(3) { width: 8%; }
+    table.checklist th:nth-child(4) { width: 22%; }
+    table.checklist th:nth-child(5) { width: 22%; }
+    table.checklist th:nth-child(6) { width: 27%; }
+    .ok { color: #1a7f37; }
+    .warn { color: #b45309; }
+    .fail { color: #b42318; font-weight: bold; }
+    .skip { color: #666; }
+    .section { margin-top: 24px; }
+    .check-pass { color: #1a7f37; }
+    .check-success { color: #0d6e3f; font-weight: 600; }
+    .check-warn { color: #b45309; }
+    .check-fail { color: #b42318; }
+  </style>
+</head>
+<body>
+  <h1>health check report</h1>
+  <div class="meta">
+    <p><strong>site:</strong> {{ site_name }}</p>
+    <p><strong>job id:</strong> {{ job_id }}</p>
+    {% if period %}<p><strong>period:</strong> {{ period }}</p>{% endif %}
+    {% if engineer_notes %}<p><strong>notes:</strong> {{ engineer_notes }}</p>{% endif %}
+  </div>
+
+  <div class="section">
+    <h2>devices</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>label</th>
+          <th>platform</th>
+          <th>host</th>
+          <th>categories</th>
+          <th>errors</th>
+          <th>status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in devices %}
+        <tr>
+          <td>{{ d.device_label }}</td>
+          <td>{% if d.data.get('_platform') == 'rseries' %}rSeries{% else %}iSeries{% endif %}</td>
+          <td>{{ d.host }}</td>
+          <td>{{ d.data.keys()|list|join(', ') }}</td>
+          <td>{{ d.errors|length }}</td>
+          <td class="{% if d.errors|length == 0 %}ok{% else %}warn{% endif %}">
+            {% if d.errors|length == 0 %}ok{% else %}check{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if checklist_by_device %}
+  <div class="section">
+    <h2>정기점검 Common 체크리스트</h2>
+    <p style="color:#555;">iSeries / rSeries / VE — TMOS 기준 | rSeries HW=F5OS</p>
+    {% for d in devices %}
+    {% set label = d.device_label %}
+    {% set rows = checklist_by_device.get(label, []) %}
+    <h3>{{ label }}</h3>
+    <table class="checklist">
+      <thead>
+        <tr>
+          <th>항목</th>
+          <th>레이어</th>
+          <th>결과</th>
+          <th>값</th>
+          <th>판정 기준</th>
+          <th>비고</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows if r.item_id != 'policy_backup' %}
+        <tr>
+          <td>{{ r.name }}</td>
+          <td>{{ r.layer }}</td>
+          <td class="check-{{ r.status }}">{{ r.status }}</td>
+          <td>{{ r.value }}</td>
+          <td>{{ r.criteria }}</td>
+          <td>{{ r.detail }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% set modules = module_summary_by_device.get(label, {}) %}
+    {% if modules %}
+    <h4 style="margin-top:16px;">모듈 수집 (LTM / APM / AWAF)</h4>
+    <p style="color:#555; margin-top:0;">체크한 항목만 REST 조회.</p>
+    {% for mod_key, mod_rows in modules.items() %}
+    <h4>{{ module_section_title(mod_key) }}</h4>
+    <table class="checklist">
+      <thead>
+        <tr><th>대상</th><th>개수</th><th>비고</th></tr>
+      </thead>
+      <tbody>
+        {% for row in mod_rows %}
+        <tr>
+          <td>{{ row.object }}</td>
+          <td>{{ row.value }}</td>
+          <td>{{ row.detail }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endfor %}
+    {% endif %}
+    {% set backup_rows = rows | selectattr('item_id', 'equalto', 'policy_backup') | list %}
+    {% if backup_rows %}
+    <h4 style="margin-top:16px;">정책 백업</h4>
+    <table class="checklist">
+      <thead>
+        <tr>
+          <th>항목</th>
+          <th>레이어</th>
+          <th>결과</th>
+          <th>값</th>
+          <th>판정 기준</th>
+          <th>비고</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in backup_rows %}
+        <tr>
+          <td>{{ r.name }}</td>
+          <td>{{ r.layer }}</td>
+          <td class="check-{{ r.status }}">{{ r.status }}</td>
+          <td>{{ r.value }}</td>
+          <td>{{ r.criteria }}</td>
+          <td>{{ r.detail }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if exceptions %}
+  <div class="section">
+    <h2>exceptions</h2>
+    <table>
+      <tr><th>device</th><th>severity</th><th>message</th></tr>
+      {% for e in exceptions %}
+      <tr><td>{{ e.device }}</td><td>{{ e.severity }}</td><td>{{ e.message }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+</body>
+</html>

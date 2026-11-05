@@ -1,0 +1,58 @@
+# OS Upgrade — Pre-check snapshot profile
+# 실제 이미지 업그레이드는 실행하지 않음. 수집·검증용.
+
+version: 1
+phase: pre
+preset: os_upgrade_pre
+
+collect:
+  categories:
+    - common
+    - ltm
+  perform_ucs_backup: true
+
+items:
+  - id: sys_version
+    name: 현재 버전
+    layer: tmos
+    criteria: "/tm/sys/version — 리포트·diff 기준선"
+
+  - id: ha_status
+    name: HA 상태
+    layer: tmos
+    criteria: "Standalone / Active / Standby; Force Offline = blocker"
+
+  - id: disk
+    name: 디스크 여유
+    layer: both
+    criteria: "/var, /shared df 사용률 80% 미만"
+
+  - id: ntp
+    name: NTP 동기
+    layer: both
+    criteria: "ntpq -np — 동기 peer 존재"
+
+  - id: policy_backup
+    name: Config 백업 (UCS)
+    layer: tmos
+    criteria: "Pre에서 save sys ucs 권장 (collect.perform_ucs_backup)"
+
+  - id: pool_availability
+    name: Pool/VS 가용성 요약
+    layer: tmos
+    criteria: "ltm 카테고리 — unavailable/down 개수"
+
+  - id: interface
+    name: 인터페이스 상태
+    layer: both
+    criteria: "VLAN 사용 IF up/down (Pre baseline)"
+
+  - id: daemons
+    name: 주요 서비스
+    layer: tmos
+    criteria: "tmm, bigd, mcpd running"
+
+  - id: f5os_connectivity
+    name: rSeries F5OS 연결
+    layer: f5os
+    criteria: "rSeries — F5OS MGMT + tenant TMOS 연결성"
