@@ -4,7 +4,7 @@ offline windows automation platform for f5 field engineers (phase 1 poc).
 
 ## version
 
-현재 버전은 **1.1.0** 입니다. 출처는 `pyproject.toml`의 `version`이며, 창 제목과 설치 파일 이름에 같은 값이 들어갑니다.
+현재 버전은 **1.2.0** 입니다. 출처는 `pyproject.toml`의 `version`이며, 창 제목과 설치 파일 이름에 같은 값이 들어갑니다.
 
 번호는 `1.2.3` 형식입니다.
 
@@ -18,6 +18,7 @@ offline windows automation platform for f5 field engineers (phase 1 poc).
 |------|------|-----------|
 | 1.0.0 | 정기 점검, OS 업그레이드 전 사전 점검. 당시 빌드 파일 버전은 0.1.0 | `dist\installer\NcurityF5Tool-Setup-1.0.0.exe` |
 | 1.1.0 | APM Macro Save / Load | `dist\installer\NcurityF5Tool-Setup-1.1.0.exe` |
+| 1.2.0 | VPE Viewer, 납품확인서 작성, 메뉴 정리 | GitHub Releases `NcurityF5Tool-Setup-1.2.0.exe` |
 
 자세한 변경 내용은 [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md)에 있습니다.
 

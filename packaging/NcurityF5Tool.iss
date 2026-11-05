@@ -50,6 +50,7 @@ Source: "..\dist\NcurityF5Tool\*"; DestDir: "{app}"; Flags: ignoreversion recurs
 Source: "..\docs\RELEASE_NOTES.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\docs\release-notes\1.0.0.md"; DestDir: "{app}\docs\release-notes"; Flags: ignoreversion
 Source: "..\docs\release-notes\1.1.0.md"; DestDir: "{app}\docs\release-notes"; Flags: ignoreversion
+Source: "..\docs\release-notes\1.2.0.md"; DestDir: "{app}\docs\release-notes"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "f5-field-automation"
-version = "1.1.0"
+version = "1.2.0"
 description = "offline windows automation platform for f5 field engineers"
 readme = "readme.md"
 requires-python = ">=3.12"
