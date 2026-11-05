@@ -28,6 +28,7 @@ from app.gui.form_controls import apply_form_control_policies
 from app.gui.theme import polish_widget_scrollbars
 from app.gui.session_manager import SessionManager
 from app.gui.widgets.device_connection_panel import DeviceConnectionPanel
+from app.gui.views.delivery_form_view import DeliveryFormView
 from app.gui.views.health_check_view import HealthCheckView
 from app.gui.views.home_view import HomeView
 from app.gui.views.os_upgrade_check_view import OsUpgradeCheckView
@@ -75,11 +76,14 @@ class MainWindow(QMainWindow):
         self.nav.setObjectName("navList")
         sections = [
             ("Home", [("Home", 0)]),
-            ("Device Check", [("정기 점검", 1), ("OS 업그레이드 간 점검", 2)]),
-            ("APM", [("VPE Viewer", 3), ("VPE Macro Copy", 4)]),
-            ("Initial Setup", [("Initial Setup", 5)]),
-            ("Reports", [("Reports", 6)]),
-            ("Settings", [("Settings", 7)]),
+            (
+                "Device Check",
+                [("정기 점검", 1), ("OS 업그레이드 간 점검", 2), ("납품확인서 작성", 3)],
+            ),
+            ("APM", [("VPE Viewer", 4), ("VPE Macro Copy", 5)]),
+            ("Initial Setup", [("Initial Setup", 6)]),
+            ("Reports", [("Reports", 7)]),
+            ("Settings", [("Settings", 8)]),
         ]
         for title, pages in sections:
             header = QListWidgetItem(title)
@@ -105,6 +109,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(HomeView())
         self.stack.addWidget(HealthCheckView(project_root))
         self.stack.addWidget(OsUpgradeCheckView(project_root))
+        self.stack.addWidget(DeliveryFormView())
         self.stack.addWidget(VpeViewerView())
         self.stack.addWidget(VpeMacroView(project_root))
         self.stack.addWidget(

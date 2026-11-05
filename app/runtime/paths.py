@@ -43,3 +43,27 @@ def install_dir() -> Path | None:
     if not is_frozen():
         return None
     return Path(sys.executable).resolve().parent
+
+
+def template_path() -> Path:
+    """Word template for the delivery confirmation document."""
+    name = Path("templates") / "delivery_confirmation_template.docx"
+    if is_frozen():
+        bundled = bundle_root()
+        if bundled is not None:
+            candidate = bundled / name
+            if candidate.is_file():
+                return candidate
+        installed = install_dir()
+        if installed is not None:
+            candidate = installed / name
+            if candidate.is_file():
+                return candidate
+    return dev_project_root() / name
+
+
+def output_dir() -> Path:
+    """Writable folder for generated delivery confirmation documents."""
+    path = gui_project_root() / "output"
+    path.mkdir(parents=True, exist_ok=True)
+    return path

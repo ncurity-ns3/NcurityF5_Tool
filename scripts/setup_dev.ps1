@@ -46,4 +46,4 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
 Write-Host "setup complete. next:"
-Write-Host "  scripts\run_tests.cmd"
+Write-Host "  powershell -File scripts\run_gui.ps1"

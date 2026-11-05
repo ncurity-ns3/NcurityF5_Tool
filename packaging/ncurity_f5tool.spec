@@ -34,6 +34,7 @@ a = Analysis(
         "yaml",
         "flask",
         "werkzeug",
+        "docx",
     ],
     hookspath=[],
     hooksconfig={},
