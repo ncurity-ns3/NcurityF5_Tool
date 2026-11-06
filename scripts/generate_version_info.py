@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import sys
 from pathlib import Path
 
 
@@ -12,7 +11,11 @@ def _read_version(root: Path) -> tuple[str, int, int, int, int]:
     match = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MULTILINE)
     version = match.group(1) if match else "1.1.0"
     parts = (version.split(".") + ["0", "0", "0"])[:4]
-    nums = tuple(int(p) for p in parts)
+    nums = tuple(int(part) for part in parts)
+    # A three-part release is 1.3.1.1 on Windows. 1.3.1.0 would not replace
+    # an already installed 1.3.1 package.
+    if version.count(".") == 2:
+        nums = (nums[0], nums[1], nums[2], max(nums[3], 1))
     return version, nums
 
 

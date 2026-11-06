@@ -38,6 +38,7 @@ if (-not (Test-Path -LiteralPath $Exe)) {
 
 $AppVersion = Get-AppVersion
 $parts = @($AppVersion.Split(".") + @("0", "0", "0", "0"))[0..3]
+if ($AppVersion.Split(".").Count -eq 3 -and [int]$parts[3] -lt 1) { $parts[3] = "1" }
 $ProductVersion = ($parts -join ".")
 $Wix = Find-Wix
 $Stage = Join-Path $env:TEMP "ncurity-f5tool-msi-src"

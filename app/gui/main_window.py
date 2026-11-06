@@ -34,6 +34,7 @@ from app.gui.views.os_upgrade_check_view import OsUpgradeCheckView
 from app.gui.views.placeholder_view import PlaceholderView
 from app.gui.views.vpe_macro_view import VpeMacroView
 from app.gui.views.vpe_viewer_view import VpeViewerView
+from app.gui.views.waf_custom_view import WafCustomView
 from app.gui.views.waf_view import WafView
 from app.gui.widgets.device_connection_panel import DeviceConnectionPanel
 
@@ -82,10 +83,10 @@ class MainWindow(QMainWindow):
                 [("정기 점검", 1), ("OS 업그레이드 간 점검", 2), ("납품확인서 작성", 3)],
             ),
             ("APM", [("VPE Viewer", 4), ("VPE Macro Copy", 5)]),
-            ("WAF", [("OWASP Top 10", 6)]),
-            ("Initial Setup", [("Initial Setup", 7)]),
-            ("Reports", [("Reports", 8)]),
-            ("Settings", [("Settings", 9)]),
+            ("WAF", [("OWASP Top 10", 6), ("요청 작성", 7)]),
+            ("Initial Setup", [("Initial Setup", 8)]),
+            ("Reports", [("Reports", 9)]),
+            ("Settings", [("Settings", 10)]),
         ]
         for title, pages in sections:
             header = QListWidgetItem(title)
@@ -115,6 +116,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(VpeViewerView())
         self.stack.addWidget(VpeMacroView(project_root))
         self.stack.addWidget(WafView())
+        self.stack.addWidget(WafCustomView())
         self.stack.addWidget(
             PlaceholderView(
                 "Initial Setup",
@@ -169,6 +171,8 @@ class MainWindow(QMainWindow):
         for view in self.findChildren(VpeViewerView):
             view.shutdown()
         for view in self.findChildren(WafView):
+            view.shutdown()
+        for view in self.findChildren(WafCustomView):
             view.shutdown()
         SessionManager.instance().clear_all()
         super().closeEvent(event)

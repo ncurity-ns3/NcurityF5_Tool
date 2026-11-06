@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QTextCursor
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
+    QDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QTableWidget,
+    QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -31,6 +35,7 @@ from app.gui.workers.waf_poc_worker import WafPocWorker
 from app.modules.waf_poc.catalog import DEFAULT_YEAR, YEARS, PocCase, cases_for_year
 from app.modules.waf_poc.curlutil import Target
 from app.modules.waf_poc.runner import SendSummary
+from app.modules.waf_poc.verdict import RequestResult, format_report, summary_rows
 
 
 class WafView(QWidget):
@@ -39,6 +44,7 @@ class WafView(QWidget):
         self._checks: dict[str, NcurityCheckBox] = {}
         self._updating = False
         self._worker: WafPocWorker | None = None
+        self._results: list[RequestResult] = []
 
         root = QVBoxLayout(self)
         root.setSpacing(12)
@@ -48,7 +54,8 @@ class WafView(QWidget):
         mark_page_title(title)
         root.addWidget(title)
         subtitle = QLabel(
-            "OWASP Top 10 테스트 · PoC 전용. 입력한 IP와 Host로만 curl을 보냅니다."
+            "OWASP Top 10 테스트 · PoC 전용. 입력한 IP와 Host로만 curl을 보냅니다. "
+            "아래에는 항목별 건수만 나오고, 응답 전문은 Report에서 봅니다."
         )
         subtitle.setWordWrap(True)
         mark_page_subtitle(subtitle)
@@ -143,29 +150,46 @@ class WafView(QWidget):
         mark_secondary_button(self.stop_btn)
         self.stop_btn.setFixedHeight(36)
         self.stop_btn.setEnabled(False)
+        self.report_btn = QPushButton("Report")
+        mark_secondary_button(self.report_btn)
+        self.report_btn.setFixedHeight(36)
+        self.report_btn.setEnabled(False)
         self.status_label = QLabel("대기")
         self.status_label.setProperty("role", "muted")
         buttons.addWidget(self.send_btn)
         buttons.addWidget(self.stop_btn)
+        buttons.addWidget(self.report_btn)
         buttons.addWidget(self.status_label, stretch=1)
         root.addLayout(buttons)
 
-        log_title = QLabel("전송 결과")
+        log_title = QLabel("항목별 결과")
         log_title.setProperty("role", "infoTitle")
         root.addWidget(log_title)
-        self.log = QTextEdit()
-        self.log.setReadOnly(True)
-        self.log.setAcceptRichText(False)
-        self.log.setFont(QFont("Consolas", 10))
-        self.log.setPlaceholderText("전송 결과가 여기에 표시됩니다.")
-        self.log.setMinimumHeight(160)
-        root.addWidget(self.log, stretch=1)
+        self.summary = QTableWidget(0, 5)
+        self.summary.setHorizontalHeaderLabels(["구분", "공격", "차단", "통과", "실패"])
+        self.summary.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.summary.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self.summary.verticalHeader().setVisible(False)
+        self.summary.setMinimumHeight(180)
+        header = self.summary.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column in range(1, 5):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        root.addWidget(self.summary, stretch=1)
+        note = QLabel(
+            "차단은 HTTP 403·406·429이거나 응답에 Request Rejected / Support ID가 있는 경우입니다. "
+            "그 외 응답은 통과, 연결 실패와 시간 초과는 실패입니다."
+        )
+        note.setWordWrap(True)
+        note.setProperty("role", "muted")
+        root.addWidget(note)
 
         self.year.currentIndexChanged.connect(self._reload_cases)
         self.protocol.currentTextChanged.connect(self._on_protocol)
         self.select_all.toggled.connect(self._toggle_all)
         self.send_btn.clicked.connect(self._send)
         self.stop_btn.clicked.connect(self._stop)
+        self.report_btn.clicked.connect(self._show_report)
         self._reload_cases()
 
     def shutdown(self) -> None:
@@ -262,7 +286,9 @@ class WafView(QWidget):
         if not cases:
             QMessageBox.information(self, "WAF", "보낼 항목을 선택해 주세요.")
             return
-        self.log.clear()
+        self._results = []
+        self.summary.setRowCount(0)
+        self.report_btn.setEnabled(False)
         self._set_running(True)
         self.status_label.setText("전송 중")
         worker = WafPocWorker(cases, target)
@@ -279,27 +305,58 @@ class WafView(QWidget):
             self._worker.stop_now()
 
     def _append_log(self, text: str) -> None:
-        cursor = self.log.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        if self.log.toPlainText():
-            cursor.insertText("\n")
-        cursor.insertText(text.rstrip("\n"))
-        self.log.setTextCursor(cursor)
-        self.log.ensureCursorVisible()
+        self.status_label.setText(text.replace("\n", " "))
+
+    def _fill_summary(self, results: list[RequestResult]) -> None:
+        rows = summary_rows(results)
+        self.summary.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            for column, value in enumerate(row):
+                item = QTableWidgetItem(str(value))
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                if column == 0:
+                    item.setTextAlignment(
+                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                    )
+                self.summary.setItem(row_index, column, item)
+
+    def _show_report(self) -> None:
+        if not self._results:
+            QMessageBox.information(self, "WAF", "아직 전송 결과가 없습니다.")
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("OWASP Top 10 Report")
+        dialog.resize(860, 640)
+        layout = QVBoxLayout(dialog)
+        report = QTextEdit()
+        report.setReadOnly(True)
+        report.setAcceptRichText(False)
+        report.setFont(QFont("Consolas", 10))
+        report.setPlainText(format_report(self._results))
+        layout.addWidget(report)
+        close = QPushButton("닫기")
+        mark_secondary_button(close)
+        close.clicked.connect(dialog.accept)
+        layout.addWidget(close)
+        dialog.exec()
 
     def _on_done(self, summary: object) -> None:
         if not isinstance(summary, SendSummary):
             return
-        if summary.stopped:
-            self.status_label.setText(f"중지 · 전송 {summary.sent}건")
-        elif summary.failed:
-            self.status_label.setText(f"완료 · 전송 {summary.sent}건, 실패 {summary.failed}건")
-        else:
-            self.status_label.setText(f"완료 · 전송 {summary.sent}건")
+        self._results = list(summary.results)
+        self._fill_summary(self._results)
+        self.report_btn.setEnabled(bool(self._results))
+        blocked = sum(1 for item in self._results if item.outcome == "blocked")
+        passed = sum(1 for item in self._results if item.outcome == "passed")
+        prefix = "중지" if summary.stopped else "완료"
+        text = (
+            f"{prefix} · 공격 {summary.sent} · 차단 {blocked}"
+            f" · 통과 {passed} · 실패 {summary.failed}"
+        )
+        self.status_label.setText(text)
 
     def _on_failed(self, message: str) -> None:
-        self._append_log(message)
-        self.status_label.setText("실패")
+        self.status_label.setText(f"실패 · {message}")
 
     def _on_thread_finished(self) -> None:
         self._set_running(False)

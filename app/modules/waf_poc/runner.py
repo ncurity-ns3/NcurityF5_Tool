@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from app.modules.waf_poc.catalog import PocCase
 from app.modules.waf_poc.curlutil import Target, build_curl_argv
+from app.modules.waf_poc.verdict import RequestResult, classify_response
 
 _CREATE_NO_WINDOW = 0x08000000
 _OUTPUT_LIMIT = 4000
@@ -21,6 +22,7 @@ class SendSummary:
     sent: int
     failed: int
     stopped: bool
+    results: tuple[RequestResult, ...] = ()
 
 
 class CurlRunner:
@@ -90,32 +92,41 @@ def run_cases(
         for command in case.commands():
             jobs.append((case, command))
     total = len(jobs)
-    on_text(
-        f"대상 {target.origin}  →  {target.ip}:{target.port}\n"
-        f"항목 {len(cases)}개, 요청 {total}건\n"
-    )
+    on_text(f"대상 {target.origin}  →  {target.ip}:{target.port}  ·  요청 {total}건")
     curl_bin = find_curl()
-    sent = 0
-    failed = 0
+    results: list[RequestResult] = []
     for index, (case, command) in enumerate(jobs, start=1):
         if active.stopped:
-            on_text("\n전송을 중지했습니다.")
-            return SendSummary(sent=sent, failed=failed, stopped=True)
+            on_text("전송을 중지했습니다.")
+            return _summary(results, stopped=True)
         rewritten, argv = build_curl_argv(command, target, curl_bin)
-        on_text(f"[{index}/{total}] {case.group} · {case.title}\n{rewritten}\n")
+        on_text(f"{index}/{total}  {case.group} · {case.title}")
         code, output, timed_out = active.run_one(argv)
+        outcome, http_code = classify_response(output, timed_out=timed_out, return_code=code)
+        results.append(
+            RequestResult(
+                group=case.group,
+                title=case.title,
+                command=rewritten,
+                http_code=http_code,
+                outcome=outcome,
+                output=output,
+            )
+        )
         if active.stopped:
-            on_text(output + "\n\n전송을 중지했습니다.")
-            return SendSummary(sent=sent, failed=failed, stopped=True)
-        sent += 1
-        if code != 0 or timed_out:
-            failed += 1
-        if output:
-            on_text(output + "\n")
-        else:
-            on_text(f"(응답 본문 없음, curl 종료 코드 {code})\n")
-    on_text(f"\n완료. 전송 {sent}건, 연결 실패 {failed}건")
-    return SendSummary(sent=sent, failed=failed, stopped=False)
+            on_text("전송을 중지했습니다.")
+            return _summary(results, stopped=True)
+    return _summary(results, stopped=False)
+
+
+def _summary(results: list[RequestResult], *, stopped: bool) -> SendSummary:
+    failed = sum(1 for item in results if item.outcome == "failed")
+    return SendSummary(
+        sent=len(results),
+        failed=failed,
+        stopped=stopped,
+        results=tuple(results),
+    )
 
 
 def _trim(text: str) -> str:
