@@ -30,23 +30,24 @@ def _tokenize(text: str) -> list[tuple[str, str]]:
             tokens.append((ch, ch))
             i = (i + 1)
             continue
-        if (ch == '"'):
-            i = (i + 1)
+        if (ch == '"') or (ch == '\\' and (i + 1) < n and text[(i + 1)] == '"'):
+            escaped = ch == '\\'
+            i = i + (2 if escaped else 1)
             buf = []
             while (i < n):
                 c = text[i]
+                if escaped and c == '\\' and (i + 1) < n and text[(i + 1)] == '"':
+                    i = i + 2
+                    break
                 if (c == '\\') and ((i + 1) < n):
                     buf.append(text[(i + 1)])
-                    i = (i + 2)
+                    i = i + 2
                     continue
-                if (c == '"'):
-                    i = (i + 1)
+                if (not escaped) and (c == '"'):
+                    i = i + 1
                     break
-                else:
-                    buf.append(c)
-                    i = (i + 1)
-                    if (i < n):
-                        continue
+                buf.append(c)
+                i = i + 1
             tokens.append(('STR', ''.join(buf)))
             continue
         j = i
@@ -337,11 +338,12 @@ def _path_refs(obj: Any, objects: dict[str, Any], seen: set[str] | None=None) ->
 def _last_segment(value: str) -> str:
     return str((value or '')).rsplit('/', 1)[-1]
 def _looks_like_object_name(value: str) -> bool:
-    text = str((value or '')).strip()
-    if text:
-        if (text.lower() in frozenset({'enable', 'true', 'false', 'none', 'any', 'disable'})):
-            pass
-    return False
+    text = str(value or '').strip()
+    if not text or text.lower() in {'true', 'false', 'enable', 'disable', 'none', 'any'}:
+        return False
+    if text.startswith('/'):
+        return True
+    return bool(re.fullmatch(r'[A-Za-z][A-Za-z0-9_.-]*', text) and ('_' in text or text[:1].isupper()))
 def _same_tmsh_name(left: str, right: str) -> bool:
     a = str((left or ''))
     b = str((right or ''))
@@ -404,14 +406,21 @@ def _rule_has_agent_id(source: str, agent_id: str) -> bool:
     want = str((agent_id or '')).strip()
     return (bool(want) and (want in _agent_ids_in_rule(source)))
 def _index_ltm_rules(objects: dict[str, Any]) -> dict[str, Any]:
-    by_id = {}
-    by_short = {}
+    by_id: dict[str, list[str]] = {}
+    by_short: dict[str, str] = {}
     rule_count = 0
     for obj in objects.values():
-        if isinstance(obj, dict):
-            if (obj.get('object_kind') != 'ltm rule'):
-                continue
-        continue
+        if not isinstance(obj, dict) or obj.get('object_kind') != 'ltm rule':
+            continue
+        name = str(obj.get('name') or '')
+        if not name:
+            continue
+        rule_count += 1
+        by_short.setdefault(_last_segment(name), name)
+        for agent_id in _agent_ids_in_rule(str(obj.get('source') or '')):
+            names = by_id.setdefault(agent_id, [])
+            if name not in names:
+                names.append(name)
     return {'by_id': by_id, 'by_short': by_short, 'rule_count': rule_count}
 def _profiles_for_policy(policy_name: str, profiles: list[dict[str, Any]]) -> list[str]:
     names = []
@@ -471,18 +480,23 @@ def _macro_users(policies: list[dict[str, Any]], items: dict[str, dict[str, Any]
 def _owning_access_policies(policy_name: str, policies: list[dict[str, Any]], users: dict[str, set[str]]) -> list[str]:
     by_name = {p['name']: p for p in policies}
     current = by_name.get(policy_name)
-    if current:
-        if (current.get('type') != 'macro'):
-            return [policy_name]
-    starts = []
-    seen = set()
+    if current and current.get('type') != 'macro':
+        return [policy_name]
+    starts: list[str] = []
+    seen: set[str] = set()
     stack = list(users.get(policy_name, ()))
     while stack:
         name = stack.pop()
-        if name:
-            if (name in seen):
-                continue
-        continue
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        pol = by_name.get(name)
+        if not pol:
+            continue
+        if pol.get('type') != 'macro':
+            starts.append(name)
+        else:
+            stack.extend(users.get(name, ()))
     return starts
 def _rule_source_from_span(text: str, span: tuple[int, int]) -> str:
     raw = text[span[0]:span[1]].strip()
@@ -536,41 +550,43 @@ def _resolve_rule_object(name: str, objects: dict[str, Any], rule_index: dict[st
         return current
     return
 def _match_ltm_rules(agent_id: str, objects: dict[str, Any], allowed_rules: list[dict[str, Any]] | None=None, fallback: bool=True, rule_index: dict[str, Any] | None=None) -> list[dict[str, Any]]:
-    want = str((agent_id or '')).strip()
-    if not (want):
+    want = str(agent_id or '').strip()
+    if not want:
         return []
-    index = (rule_index or _index_ltm_rules(objects))
-    def pack(name='return', virtuals='dict[str, Any] | None'):
+    index = rule_index or _index_ltm_rules(objects)
+
+    def pack(name: str, virtuals: list[str] | None=None) -> dict[str, Any] | None:
         obj = _resolve_rule_object(name, objects, index)
-        if obj is not None:
-            if not (_rule_has_agent_id(str((obj.get('source') or '')), want)):
-                pass
-        return
+        if obj is None or not _rule_has_agent_id(str(obj.get('source') or ''), want):
+            return None
+        item = dict(obj)
+        if virtuals:
+            item['virtuals'] = virtuals
+        return item
+
     if allowed_rules is not None:
-        found = []
-        seen = set()
+        found: list[dict[str, Any]] = []
+        seen: set[str] = set()
         for item in allowed_rules:
-            name = str((item.get('name') or ''))
-            packed = pack(name, list((item.get('virtuals') or [])))
+            name = str(item.get('name') or '')
+            packed = pack(name, list(item.get('virtuals') or []))
             if packed is None:
                 continue
-            key = str((packed.get('name') or name))
-            if (key in seen):
+            key = str(packed.get('name') or name)
+            if key in seen:
                 continue
             seen.add(key)
             found.append(packed)
-        if not (found):
-            if not (fallback):
-                pass
-        return found
+        if found or not fallback:
+            return found
     found = []
     seen = set()
-    for name in (index.get('by_id', {}).get(want) or []):
+    for name in index.get('by_id', {}).get(want) or []:
         packed = pack(name)
         if packed is None:
             continue
-        key = str((packed.get('name') or name))
-        if (key in seen):
+        key = str(packed.get('name') or name)
+        if key in seen:
             continue
         seen.add(key)
         found.append(packed)
@@ -673,14 +689,24 @@ def _policies_on_virtuals(profiles: list[dict[str, Any]], virtuals: list[dict[st
     return [str(pol['name']) for pol in policies if (pol.get('type') != 'macro') and pol.get('name')]
 def _needed_policy_names(start_names: list[str], policies: list[dict[str, Any]], items: dict[str, dict[str, Any]]) -> set[str]:
     by_name = {pol['name']: pol for pol in policies if pol.get('name')}
-    needed = set()
+    needed: set[str] = set()
     stack = list(start_names)
     while stack:
         name = stack.pop()
-        if name:
-            if (name in needed):
-                continue
-        continue
+        if not name or name in needed:
+            continue
+        needed.add(name)
+        pol = by_name.get(name)
+        if not pol:
+            continue
+        for macro in pol.get('macros') or []:
+            if isinstance(macro, str):
+                stack.append(macro)
+        for item_name in pol.get('items') or []:
+            item = items.get(item_name) or {}
+            macro = item.get('macro')
+            if isinstance(macro, str) and macro:
+                stack.append(macro)
     return needed
 def _build_one_graph(pol: dict[str, Any], items: dict[str, dict[str, Any]], agents: dict[str, Any], objects: dict[str, Any], profiles: list[dict[str, Any]], virtuals: list[dict[str, Any]], policies: list[dict[str, Any]], macro_users: dict[str, set[str]], rule_index: dict[str, Any] | None=None) -> dict[str, Any]:
     nodes = []
