@@ -12,7 +12,6 @@ from PyQt6.QtWidgets import (
     QFrame,
     QGraphicsItem,
     QGraphicsPathItem,
-    QGraphicsRectItem,
     QGraphicsScene,
     QGraphicsSimpleTextItem,
     QGraphicsView,
@@ -22,6 +21,7 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QTextEdit,
     QVBoxLayout,
@@ -90,7 +90,7 @@ class _NodeItem(QGraphicsItem):
         color = QColor(_NODE_COLORS.get(int(self._node.get("color") or 1), _NODE_COLORS[1]))
         rect = self.boundingRect()
         caption = str(self._node.get("caption") or "")
-        font = QFont("Malgun Gothic", 9)
+        font = QFont("Malgun Gothic", 10)
         font.setBold(True)
         painter.setFont(font)
         if kind in {"start", "entry"}:
@@ -129,9 +129,10 @@ class _NodeItem(QGraphicsItem):
 
 
 class _GraphView(QGraphicsView):
-    def __init__(self, scene: QGraphicsScene, on_file) -> None:
+    def __init__(self, scene: QGraphicsScene, on_file, on_zoom=None) -> None:
         super().__init__(scene)
         self._on_file = on_file
+        self._on_zoom = on_zoom
         self.setAcceptDrops(True)
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802
@@ -149,12 +150,131 @@ class _GraphView(QGraphicsView):
         super().dropEvent(event)
 
     def wheelEvent(self, event) -> None:  # noqa: N802
-        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier and self._on_zoom is not None:
             factor = 1.12 if event.angleDelta().y() > 0 else 1 / 1.12
-            self.scale(factor, factor)
+            self._on_zoom(factor)
             event.accept()
             return
-        super().wheelEvent(event)
+        event.ignore()
+
+
+def _paint_policy(scene: QGraphicsScene, policy: dict, on_node, *, titled: bool) -> dict:
+    scene.clear()
+    if titled:
+        caption = str(policy.get("caption") or "")
+        title = QGraphicsSimpleTextItem(caption)
+        title.setFont(QFont("Malgun Gothic", 13, QFont.Weight.Bold))
+        title.setBrush(QBrush(QColor("#0260EA")))
+        title.setPos(16, 4)
+        scene.addItem(title)
+    laid = layout_graph(policy)
+    offset_x = 16.0
+    shift_y = 22.0 if titled else 0.0
+    for node in laid["nodes"]:
+        placed = {**node, "x": node["x"] + offset_x, "y": node["y"] + shift_y}
+        scene.addItem(_NodeItem(placed, policy, on_node))
+    edge_pen = QPen(QColor("#5d6b78"), 1.6)
+    edge_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    for edge in laid["edges"]:
+        x1 = edge["x1"] + offset_x
+        x2 = edge["x2"] + offset_x
+        y = edge["y"] + shift_y
+        path = QPainterPath()
+        path.moveTo(x1, y)
+        path.lineTo(x2, y)
+        item = QGraphicsPathItem(path)
+        item.setPen(edge_pen)
+        scene.addItem(item)
+        if x2 > x1 + 8:
+            head = QPainterPath()
+            head.moveTo(x2, y)
+            head.lineTo(x2 - 8, y - 4)
+            head.lineTo(x2 - 8, y + 4)
+            head.closeSubpath()
+            arrow = QGraphicsPathItem(head)
+            arrow.setPen(QPen(Qt.PenStyle.NoPen))
+            arrow.setBrush(QBrush(QColor("#6a7684")))
+            scene.addItem(arrow)
+        caption = str(edge.get("caption") or "")
+        if caption:
+            label = QGraphicsSimpleTextItem(caption)
+            label.setFont(QFont("Malgun Gothic", 8, QFont.Weight.Bold))
+            label.setBrush(QBrush(QColor("#1f3348")))
+            label.setPos(x1 + 8, y - 16)
+            scene.addItem(label)
+    width = float(laid.get("width") or 480) + offset_x
+    height = float(laid.get("height") or 160) + shift_y
+    return {"width": width, "height": height}
+
+
+def _place_graph_view(view: QGraphicsView, laid: dict, scale: float) -> None:
+    width = float(laid["width"]) + 28
+    height = float(laid["height"]) + 18
+    view.resetTransform()
+    view.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+    view.scale(scale, scale)
+    view.setSceneRect(QRectF(0, 0, width, height))
+    view.setFixedHeight(max(88, int(height * scale) + 8))
+    view.setMinimumWidth(int(width * scale))
+
+
+class _FlatGraphView(QGraphicsView):
+    def wheelEvent(self, event) -> None:  # noqa: N802
+        event.ignore()
+
+
+class _MacroSection(QWidget):
+    def __init__(self, policy: dict, on_node, on_toggle) -> None:
+        super().__init__()
+        self.policy = policy
+        self.name = str(policy.get("name") or "")
+        self.caption = str(policy.get("caption") or self.name.rsplit("/", 1)[-1])
+        self._on_node = on_node
+        self._drawn = False
+        self._laid: dict | None = None
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self.bar = QPushButton(f"▸    Macro: {self.caption}")
+        self.bar.setObjectName("vpeMacroBar")
+        self.bar.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.bar.setFixedHeight(36)
+        self.bar.clicked.connect(lambda: on_toggle(self.name))
+        layout.addWidget(self.bar)
+        self.scene = QGraphicsScene(self)
+        self.view = _FlatGraphView(self.scene)
+        self.view.setObjectName("vpeGraph")
+        self.view.setRenderHints(
+            QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing
+        )
+        self.view.setFrameShape(QFrame.Shape.NoFrame)
+        self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.view.setBackgroundBrush(QBrush(QColor("#F7F8FA")))
+        self.view.hide()
+        layout.addWidget(self.view)
+
+    def ensure_drawn(self) -> None:
+        if self._drawn:
+            return
+        self._laid = _paint_policy(self.scene, self.policy, self._on_node, titled=False)
+        self._drawn = True
+
+    def set_open(self, opened: bool, scale: float) -> None:
+        arrow = "▾" if opened else "▸"
+        self.bar.setText(f"{arrow}    Macro: {self.caption}")
+        self.bar.setProperty("open", opened)
+        style = self.bar.style()
+        if style is not None:
+            style.unpolish(self.bar)
+            style.polish(self.bar)
+        if not opened:
+            self.view.hide()
+            return
+        self.ensure_drawn()
+        if self._laid is not None:
+            _place_graph_view(self.view, self._laid, scale)
+        self.view.show()
 
 
 class VpeViewerView(QWidget):
@@ -164,8 +284,12 @@ class VpeViewerView(QWidget):
         self._model: dict | None = None
         self._worker: _LoadWorker | None = None
         self._policy: dict | None = None
-        self._macro_anchors: dict[str, float] = {}
-        self._main_rect: QRectF | None = None
+        self._sections: list[_MacroSection] = []
+        self._open_macros: set[str] = set()
+        self._main_laid: dict | None = None
+        self._main_width = 640.0
+        self._zoom = 1.0
+        self._draw_gen = 0
         self._copy_text = ""
         self._find_at = 0
         self._scene = QGraphicsScene(self)
@@ -201,8 +325,8 @@ class VpeViewerView(QWidget):
         for button in (zoom_out, zoom_in, zoom_fit):
             mark_secondary_button(button)
             tools.addWidget(button)
-        zoom_out.clicked.connect(lambda: self._view.scale(1 / 1.2, 1 / 1.2))
-        zoom_in.clicked.connect(lambda: self._view.scale(1.2, 1.2))
+        zoom_out.clicked.connect(lambda: self._zoom_by(1 / 1.2))
+        zoom_in.clicked.connect(lambda: self._zoom_by(1.2))
         zoom_fit.clicked.connect(self._fit)
         self._find = QLineEdit()
         self._find.setPlaceholderText("찾기  Ctrl+F")
@@ -225,14 +349,16 @@ class VpeViewerView(QWidget):
         self._profiles = QListWidget()
         self._profiles.setObjectName("vpeProfileList")
         self._profiles.currentItemChanged.connect(self._on_profile)
-        self._view = _GraphView(self._scene, self._load_path)
+        self._view = _GraphView(self._scene, self._load_path, self._zoom_by)
         self._view.setObjectName("vpeGraph")
         self._view.setRenderHints(
             QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing
         )
         self._view.setDragMode(QGraphicsView.DragMode.NoDrag)
         self._view.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
-        self._view.setBackgroundBrush(QBrush(QColor("#F7F9FC")))
+        self._view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._view.setBackgroundBrush(QBrush(QColor("#F7F8FA")))
         self._detail = QTextEdit()
         self._detail.setReadOnly(True)
         self._detail.setPlaceholderText("항목을 누르면 설정이 여기에 나옵니다.")
@@ -244,14 +370,25 @@ class VpeViewerView(QWidget):
         canvas_layout = QVBoxLayout(self._canvas)
         canvas_layout.setContentsMargins(0, 0, 0, 0)
         canvas_layout.addWidget(self._hint)
-        canvas_layout.addWidget(self._view)
+        self._page = QWidget()
+        self._page.setObjectName("vpePage")
+        self._page_layout = QVBoxLayout(self._page)
+        self._page_layout.setContentsMargins(0, 0, 0, 0)
+        self._page_layout.setSpacing(0)
+        self._page_layout.addWidget(self._view)
+        self._macro_split = QFrame()
+        self._macro_split.setObjectName("vpeMacroSplit")
+        self._macro_split.setFixedHeight(18)
+        self._macro_split.hide()
+        self._page_layout.addStretch(1)
         self._view.hide()
-        self._macros = QListWidget()
-        self._macros.setObjectName("vpeMacroList")
-        self._macros.setMaximumHeight(140)
-        self._macros.hide()
-        self._macros.itemClicked.connect(self._on_macro)
-        canvas_layout.addWidget(self._macros)
+        self._scroll = QScrollArea()
+        self._scroll.setObjectName("vpeScroll")
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._scroll.setWidget(self._page)
+        self._scroll.hide()
+        canvas_layout.addWidget(self._scroll)
         detail_box = QWidget()
         detail_layout = QVBoxLayout(detail_box)
         detail_layout.setContentsMargins(0, 0, 0, 0)
@@ -272,14 +409,37 @@ class VpeViewerView(QWidget):
         root.addWidget(splitter, stretch=1)
         self.setStyleSheet(
             """
-            QListWidget#vpeProfileList, QListWidget#vpeMacroList, QTextEdit, QFrame#vpeCanvas {
+            QListWidget#vpeProfileList, QTextEdit, QFrame#vpeCanvas {
                 background: #FFFFFF;
                 border: 1px solid #E2E8F0;
                 border-radius: 10px;
             }
             QListWidget#vpeProfileList::item { padding: 6px 8px; }
             QListWidget#vpeProfileList::item:selected { background: #EDF5FF; color: #0260EA; }
-            QGraphicsView#vpeGraph { background: #F7F9FC; border: none; }
+            QScrollArea#vpeScroll, QWidget#vpePage { background: #e8eaed; border: none; }
+            QGraphicsView#vpeGraph { background: #F7F8FA; border: none; }
+            QFrame#vpeMacroSplit {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #eef0f2, stop:1 #dfe3e7);
+                border: none;
+                border-top: 1px solid #c5ccd3;
+                border-bottom: 1px solid #b7bec6;
+            }
+            QPushButton#vpeMacroBar {
+                text-align: left;
+                padding: 7px 14px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f7f8f9, stop:1 #e7eaed);
+                border: none;
+                border-top: 1px solid #c5ccd3;
+                border-bottom: 1px solid #d5dbe2;
+                color: #0260EA;
+                font-weight: 700;
+                font-size: 13px;
+            }
+            QPushButton#vpeMacroBar:hover { background: #e7eef6; }
+            QPushButton#vpeMacroBar[open="true"] {
+                background: #e4eef8;
+                border-bottom: 1px solid #c5d4e6;
+            }
             """
         )
 
@@ -428,150 +588,118 @@ class VpeViewerView(QWidget):
             if item.get("name") and item.get("name") != policy.get("name")
         ]
         self._draw_stack(policy, macros, focus)
-        self._fill_macros(policy)
         self._show_overview(policy)
         caption = policy.get("caption") or name.rsplit("/", 1)[-1]
         self._status.setText(str(caption))
 
     def _draw_stack(self, policy: dict, macros: list[dict], focus: str = "") -> None:
         self._hint.hide()
+        self._scroll.show()
         self._view.show()
-        self._scene.clear()
-        self._macro_anchors = {}
-        cursor = self._paint_section(policy, 8, macro=False)
-        self._main_rect = QRectF(self._scene.itemsBoundingRect())
+        self._clear_sections()
+        self._open_macros = set()
+        self._main_laid = _paint_policy(self._scene, policy, self._on_node, titled=True)
+        self._main_width = float(self._main_laid["width"])
+        focus_name = self._match_macro_name(focus, macros)
+        if focus_name:
+            self._open_macros.add(focus_name)
+        if macros:
+            self._page_layout.insertWidget(self._page_layout.count() - 1, self._macro_split)
+            self._macro_split.show()
         for macro in macros:
-            cursor += 18
-            cursor = self._paint_section(macro, cursor, macro=True)
-        bounds = self._scene.itemsBoundingRect().adjusted(-24, -12, 48, 36)
-        self._scene.setSceneRect(bounds)
-        QTimer.singleShot(0, lambda: self._reveal(focus))
+            section = _MacroSection(macro, self._on_node, self._toggle_macro)
+            self._sections.append(section)
+            self._page_layout.insertWidget(self._page_layout.count() - 1, section)
+        self._draw_gen += 1
+        generation = self._draw_gen
+        QTimer.singleShot(0, lambda: self._reveal_if(generation, focus_name))
 
-    def _paint_section(self, policy: dict, top: float, *, macro: bool) -> float:
-        caption = str(policy.get("caption") or policy.get("name") or "")
-        if macro:
-            name = str(policy.get("name") or "")
-            self._macro_anchors[name] = top
-            last = name.rsplit("/", 1)[-1]
-            self._macro_anchors.setdefault(last, top)
-            bar = QGraphicsRectItem(16, top, 420, 28)
-            bar.setBrush(QBrush(QColor("#e7eef8")))
-            bar.setPen(QPen(QColor("#c5d2e2")))
-            self._scene.addItem(bar)
-            header = QGraphicsSimpleTextItem(f"Macro: {caption}")
-            header.setFont(QFont("Malgun Gothic", 11, QFont.Weight.Bold))
-            header.setBrush(QBrush(QColor("#0260EA")))
-            header.setPos(28, top + 4)
-            self._scene.addItem(header)
-            graph_top = top + 40
-        else:
-            title = QGraphicsSimpleTextItem(caption)
-            title.setFont(QFont("Malgun Gothic", 12, QFont.Weight.Bold))
-            title.setBrush(QBrush(QColor("#0260EA")))
-            title.setPos(24, top)
-            self._scene.addItem(title)
-            graph_top = top + 36
-        return self._paint_graph(policy, graph_top)
+    def _reveal_if(self, generation: int, focus: str) -> None:
+        if generation != self._draw_gen:
+            return
+        self._reveal(focus)
 
-    def _paint_graph(self, policy: dict, offset_y: float) -> float:
-        laid = layout_graph(policy)
-        offset_x = 24.0
-        for node in laid["nodes"]:
-            placed = {**node, "x": node["x"] + offset_x, "y": node["y"] + offset_y}
-            self._scene.addItem(_NodeItem(placed, policy, self._on_node))
-        edge_pen = QPen(QColor("#5d6b78"), 1.6)
-        edge_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        for edge in laid["edges"]:
-            x1 = edge["x1"] + offset_x
-            x2 = edge["x2"] + offset_x
-            y = edge["y"] + offset_y
-            path = QPainterPath()
-            path.moveTo(x1, y)
-            path.lineTo(x2, y)
-            item = QGraphicsPathItem(path)
-            item.setPen(edge_pen)
-            self._scene.addItem(item)
-            if x2 > x1 + 8:
-                head = QPainterPath()
-                head.moveTo(x2, y)
-                head.lineTo(x2 - 8, y - 4)
-                head.lineTo(x2 - 8, y + 4)
-                head.closeSubpath()
-                arrow = QGraphicsPathItem(head)
-                arrow.setPen(QPen(Qt.PenStyle.NoPen))
-                arrow.setBrush(QBrush(QColor("#6a7684")))
-                self._scene.addItem(arrow)
-            caption = str(edge.get("caption") or "")
-            if caption:
-                label = QGraphicsSimpleTextItem(caption)
-                label.setFont(QFont("Malgun Gothic", 8, QFont.Weight.Bold))
-                label.setBrush(QBrush(QColor("#1f3348")))
-                label.setPos(x1 + 10, y - 16)
-                self._scene.addItem(label)
-        return offset_y + float(laid.get("height") or 180)
+    def _clear_sections(self) -> None:
+        self._page_layout.removeWidget(self._macro_split)
+        self._macro_split.hide()
+        for section in self._sections:
+            self._page_layout.removeWidget(section)
+            section.deleteLater()
+        self._sections = []
+
+    def _match_macro_name(self, name: str, macros: list[dict]) -> str:
+        if not name:
+            return ""
+        last = name.rsplit("/", 1)[-1]
+        for macro in macros:
+            macro_name = str(macro.get("name") or "")
+            caption = str(macro.get("caption") or "")
+            if name in {macro_name, caption} or macro_name.endswith("/" + last) or caption == last:
+                return macro_name
+        return ""
+
+    def _section_for(self, name: str) -> _MacroSection | None:
+        last = name.rsplit("/", 1)[-1]
+        for section in self._sections:
+            if name in {section.name, section.caption} or section.name.endswith("/" + last):
+                return section
+        return None
+
+    def _apply_scale(self) -> None:
+        if self._main_laid is None:
+            return
+        scale = self._zoom
+        _place_graph_view(self._view, self._main_laid, scale)
+        for section in self._sections:
+            section.set_open(section.name in self._open_macros, scale)
 
     def _reveal(self, focus: str) -> None:
-        self._fit()
+        self._zoom = 1.0
+        self._apply_scale()
         if focus:
             self._scroll_to_macro(focus)
+            return
+        self._scroll.verticalScrollBar().setValue(0)
+
+    def _scroll_vertically(self, widget: QWidget) -> None:
+        top = widget.mapTo(self._page, widget.rect().topLeft()).y()
+        bar = self._scroll.verticalScrollBar()
+        bar.setValue(max(0, int(top) - 8))
 
     def _scroll_to_macro(self, name: str) -> None:
-        top = self._macro_anchors.get(name)
-        if top is None:
-            last = name.rsplit("/", 1)[-1]
-            top = self._macro_anchors.get(last)
-        if top is None:
-            for anchor, anchor_top in self._macro_anchors.items():
-                if anchor.endswith("/" + name) or anchor.endswith("/" + name.rsplit("/", 1)[-1]):
-                    top = anchor_top
-                    break
-        if top is None:
+        section = self._section_for(name)
+        if section is None:
             return
-        center_x = self._scene.sceneRect().center().x()
-        self._view.centerOn(center_x, top + 80)
-        caption = name.rsplit("/", 1)[-1]
-        self._status.setText(f"Macro: {caption}")
+        self._open_macros.add(section.name)
+        section.set_open(True, self._zoom)
+        self._scroll_vertically(section)
+        self._status.setText(f"Macro: {section.caption}")
+
+    def _toggle_macro(self, name: str) -> None:
+        section = self._section_for(name)
+        if section is None:
+            return
+        if section.name in self._open_macros:
+            self._open_macros.discard(section.name)
+            section.set_open(False, self._zoom)
+            return
+        self._open_macros.add(section.name)
+        section.set_open(True, self._zoom)
+        self._scroll_vertically(section)
+        self._status.setText(f"Macro: {section.caption}")
+
+    def _zoom_by(self, factor: float) -> None:
+        self._zoom = max(0.35, min(self._zoom * factor, 2.8))
+        self._apply_scale()
 
     def _on_node(self, node: dict, graph: dict) -> None:
         if node.get("kind") == "macro":
-            target = str(node.get("macro") or node.get("id") or "")
-            short = target.rsplit("/", 1)[-1]
-            if target in self._macro_anchors or short in self._macro_anchors:
+            target = str(node.get("macro") or "")
+            if target and self._section_for(target) is not None:
                 self._scroll_to_macro(target)
                 self._show_detail(node, graph)
                 return
         self._show_detail(node, graph)
-
-    def _on_macro(self, item: QListWidgetItem) -> None:
-        name = str(item.data(Qt.ItemDataRole.UserRole) or "")
-        if name:
-            self._scroll_to_macro(name)
-
-    def _fill_macros(self, policy: dict) -> None:
-        self._macros.clear()
-        if policy.get("type") == "macro":
-            self._macros.hide()
-            return
-        names = []
-        for macro in policy.get("macros") or []:
-            if isinstance(macro, str) and macro:
-                names.append(macro)
-        for node in policy.get("nodes") or []:
-            macro = node.get("macro")
-            if isinstance(macro, str) and macro and macro not in names:
-                names.append(macro)
-        if not names:
-            self._macros.hide()
-            return
-        graphs = getattr(self, "_graphs", {})
-        for name in names:
-            graph = graphs.get(name) or {}
-            label = str(graph.get("caption") or name.rsplit("/", 1)[-1])
-            row = QListWidgetItem(f"Macro: {label}")
-            row.setData(Qt.ItemDataRole.UserRole, name)
-            row.setToolTip(name)
-            self._macros.addItem(row)
-        self._macros.show()
 
     def _open_find(self) -> None:
         self._find.show()
@@ -589,8 +717,17 @@ class VpeViewerView(QWidget):
             if item is not None and query in item.text().lower():
                 hits.append(("profile", item))
         for item in self._scene.items():
-            if isinstance(item, _NodeItem) and query in str(item._node.get("caption") or "").lower():
+            caption = str(item._node.get("caption") or "").lower() if isinstance(item, _NodeItem) else ""
+            if caption and query in caption:
                 hits.append(("node", item))
+        for section in self._sections:
+            if query in section.caption.lower() or query in section.name.lower():
+                hits.append(("macro", section))
+            section.ensure_drawn()
+            for item in section.scene.items():
+                caption = str(item._node.get("caption") or "").lower() if isinstance(item, _NodeItem) else ""
+                if caption and query in caption:
+                    hits.append(("macro-node", (section, item)))
         if query in self._detail.toPlainText().lower():
             hits.append(("detail", self._detail))
         if not hits:
@@ -602,8 +739,15 @@ class VpeViewerView(QWidget):
             self._profiles.setCurrentItem(target)
             self._profiles.scrollToItem(target)
         elif kind == "node" and isinstance(target, _NodeItem):
-            self._view.centerOn(target)
+            self._scroll_vertically(self._view)
             self._show_detail(target._node, target._graph)
+        elif kind == "macro" and isinstance(target, _MacroSection):
+            self._scroll_to_macro(target.name)
+        elif kind == "macro-node" and isinstance(target, tuple):
+            section, node = target
+            if isinstance(section, _MacroSection) and isinstance(node, _NodeItem):
+                self._scroll_to_macro(section.name)
+                self._show_detail(node._node, node._graph)
         else:
             self._detail.setFocus()
 
@@ -747,9 +891,10 @@ class VpeViewerView(QWidget):
         self._set_detail("\n".join(lines), "\n\n".join(sources))
 
     def _fit(self) -> None:
-        rect = self._scene.sceneRect()
-        if self._main_rect is not None and not self._main_rect.isEmpty():
-            rect = self._main_rect
-        if rect.isEmpty():
-            return
-        self._view.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+        viewport = self._scroll.viewport()
+        available = viewport.width() if viewport is not None else 0
+        if available < 80:
+            available = max(self._canvas.width() - 8, 640)
+        self._zoom = min(max((available - 36) / max(self._main_width, 1), 0.35), 1.15)
+        self._apply_scale()
+        self._scroll.verticalScrollBar().setValue(0)

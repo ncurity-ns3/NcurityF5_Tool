@@ -14,4 +14,4 @@
 | 1.1.0 | APM Macro | [1.1.0](release-notes/1.1.0.md) |
 | 1.2.0 | VPE Viewer, 납품확인서 작성 | [1.2.0](release-notes/1.2.0.md) |
 | 1.3.0 | WAF, OWASP Top 10 PoC | [1.3.0](release-notes/1.3.0.md) |
-| 1.3.1 | OWASP 2017·2021 전체, VPE 매크로 유지 | [1.3.1](release-notes/1.3.1.md) |
+| 1.3.1 | OWASP 2017·2021 전체, VPE 매크로 접기 | [1.3.1](release-notes/1.3.1.md) |
