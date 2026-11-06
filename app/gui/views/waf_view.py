@@ -50,11 +50,11 @@ class WafView(QWidget):
         root.setSpacing(12)
         root.setContentsMargins(0, 0, 0, 0)
 
-        title = QLabel("WAF")
+        title = QLabel("OWASP Top 10 취약점 공격")
         mark_page_title(title)
         root.addWidget(title)
         subtitle = QLabel(
-            "OWASP Top 10 테스트 · PoC 전용. 입력한 IP와 Host로만 curl을 보냅니다. "
+            "OWASP Top 10 취약점 공격 · PoC 전용. 입력한 IP와 Host로만 curl을 보냅니다. "
             "아래에는 항목별 건수만 나오고, 응답 전문은 Report에서 봅니다."
         )
         subtitle.setWordWrap(True)
@@ -121,7 +121,7 @@ class WafView(QWidget):
         cases_layout = QVBoxLayout(cases_card)
         cases_layout.setContentsMargins(16, 14, 16, 14)
         cases_layout.setSpacing(8)
-        section = QLabel("OWASP Top 10 테스트")
+        section = QLabel("OWASP Top 10 취약점 공격")
         section.setProperty("role", "infoTitle")
         cases_layout.addWidget(section)
         self.select_all = NcurityCheckBox("전체 선택")
@@ -325,7 +325,7 @@ class WafView(QWidget):
             QMessageBox.information(self, "WAF", "아직 전송 결과가 없습니다.")
             return
         dialog = QDialog(self)
-        dialog.setWindowTitle("OWASP Top 10 Report")
+        dialog.setWindowTitle("OWASP Top 10 취약점 공격 Report")
         dialog.resize(860, 640)
         layout = QVBoxLayout(dialog)
         report = QTextEdit()

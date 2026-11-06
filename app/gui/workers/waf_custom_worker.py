@@ -28,10 +28,7 @@ class WafCustomWorker(QThread):
         *,
         method: str,
         uri: str,
-        query: list[tuple[str, str]],
-        body_mode: str,
-        body_fields: list[tuple[str, str]],
-        raw_body: str,
+        params: list[tuple[str, str]],
         headers: list[tuple[str, str]],
         cookies: list[tuple[str, str]],
         insecure: bool,
@@ -43,10 +40,7 @@ class WafCustomWorker(QThread):
         self.target = target
         self.method = method
         self.uri = uri
-        self.query = query
-        self.body_mode = body_mode
-        self.body_fields = body_fields
-        self.raw_body = raw_body
+        self.params = params
         self.headers = headers
         self.cookies = cookies
         self.insecure = insecure
@@ -91,10 +85,7 @@ class WafCustomWorker(QThread):
                 curl_bin,
                 method=self.method,
                 uri=self.uri,
-                query=self.query,
-                body_mode=self.body_mode,
-                body_fields=self.body_fields,
-                raw_body=self.raw_body,
+                params=self.params,
                 headers=self.headers,
                 cookies=cookies,
                 insecure=self.insecure,

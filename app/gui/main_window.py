@@ -56,7 +56,7 @@ class MainWindow(QMainWindow):
 
         nav_frame = QFrame()
         nav_frame.setObjectName("navFrame")
-        nav_frame.setFixedWidth(228)
+        nav_frame.setFixedWidth(268)
         nav_layout = QVBoxLayout(nav_frame)
         nav_layout.setContentsMargins(0, 0, 0, 0)
         nav_layout.setSpacing(0)
@@ -83,7 +83,7 @@ class MainWindow(QMainWindow):
                 [("정기 점검", 1), ("OS 업그레이드 간 점검", 2), ("납품확인서 작성", 3)],
             ),
             ("APM", [("VPE Viewer", 4), ("VPE Macro Copy", 5)]),
-            ("WAF", [("OWASP Top 10", 6), ("요청 작성", 7)]),
+            ("WAF", [("OWASP Top 10 취약점 공격", 6), ("Custom 공격 구문", 7)]),
             ("Initial Setup", [("Initial Setup", 8)]),
             ("Reports", [("Reports", 9)]),
             ("Settings", [("Settings", 10)]),

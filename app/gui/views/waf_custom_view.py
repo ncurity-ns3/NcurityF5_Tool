@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QTextCursor
 from PyQt6.QtWidgets import (
     QFrame,
@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -26,14 +27,19 @@ from app.gui.theme import (
     mark_primary_button,
     mark_secondary_button,
     mark_step_card,
+    polish_widget_scrollbars,
 )
 from app.gui.widgets.ncurity_checkbox import NcurityCheckBox
 from app.gui.workers.waf_custom_worker import WafCustomWorker
 from app.modules.waf_poc.curlutil import Target
-from app.modules.waf_poc.custom_request import LoginPlan
+from app.modules.waf_poc.custom_request import DEFAULT_USER_AGENT, LoginPlan
+
+_BODY_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
 class _PairEditor(QWidget):
+    changed = pyqtSignal()
+
     def __init__(self, add_label: str) -> None:
         super().__init__()
         layout = QVBoxLayout(self)
@@ -42,11 +48,19 @@ class _PairEditor(QWidget):
         self._rows = QVBoxLayout()
         self._rows.setSpacing(6)
         layout.addLayout(self._rows)
-        add = QPushButton(add_label)
-        mark_secondary_button(add)
-        add.setFixedHeight(32)
-        add.clicked.connect(lambda: self.add_row())
-        layout.addWidget(add, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.add_button = QPushButton(add_label)
+        mark_secondary_button(self.add_button)
+        self.add_button.setMinimumHeight(36)
+        self.add_button.clicked.connect(lambda: self.add_row())
+        self._add_row = QHBoxLayout()
+        self._add_row.setContentsMargins(0, 0, 0, 0)
+        self._add_row.setSpacing(12)
+        self._add_row.addWidget(self.add_button)
+        self._add_row.addStretch()
+        layout.addLayout(self._add_row)
+
+    def place_beside_add(self, widget: QWidget) -> None:
+        self._add_row.insertWidget(self._add_row.count() - 1, widget)
 
     def add_row(self, name: str = "", value: str = "") -> None:
         row = QWidget()
@@ -59,14 +73,18 @@ class _PairEditor(QWidget):
         value_edit.setPlaceholderText("값")
         name_edit.setFixedHeight(36)
         value_edit.setFixedHeight(36)
+        name_edit.setMinimumWidth(140)
+        name_edit.textChanged.connect(self.changed.emit)
+        value_edit.textChanged.connect(self.changed.emit)
         remove = QPushButton("삭제")
         mark_secondary_button(remove)
-        remove.setFixedHeight(36)
+        remove.setFixedSize(64, 36)
         remove.clicked.connect(lambda: self._remove(row))
-        layout.addWidget(name_edit, stretch=1)
-        layout.addWidget(value_edit, stretch=2)
+        layout.addWidget(name_edit, stretch=2)
+        layout.addWidget(value_edit, stretch=3)
         layout.addWidget(remove)
         self._rows.addWidget(row)
+        self.changed.emit()
 
     def pairs(self) -> list[tuple[str, str]]:
         found: list[tuple[str, str]] = []
@@ -82,6 +100,7 @@ class _PairEditor(QWidget):
     def _remove(self, row: QWidget) -> None:
         self._rows.removeWidget(row)
         row.deleteLater()
+        self.changed.emit()
 
 
 class WafCustomView(QWidget):
@@ -91,12 +110,13 @@ class WafCustomView(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(12)
-        title = QLabel("요청 작성")
+        title = QLabel("Custom 공격 구문")
         mark_page_title(title)
         root.addWidget(title)
         subtitle = QLabel(
             "입력한 IP와 Host로만 보냅니다. "
-            "Method, URI, 헤더, 쿠키, 파라미터, 로그인을 직접 넣습니다."
+            "Method와 URI, Header, Cookie, 파라미터 순서로 넣습니다. "
+            "로그인은 체크한 뒤에만 나옵니다."
         )
         subtitle.setWordWrap(True)
         mark_page_subtitle(subtitle)
@@ -105,29 +125,36 @@ class WafCustomView(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         host = QWidget()
         form = QVBoxLayout(host)
-        form.setContentsMargins(0, 0, 0, 0)
+        form.setContentsMargins(0, 0, 8, 0)
         form.setSpacing(12)
         form.addWidget(self._build_target())
         form.addWidget(self._build_request())
         form.addWidget(self._build_headers())
         form.addWidget(self._build_cookies())
+        form.addWidget(self._build_params())
         form.addWidget(self._build_login())
+        form.addStretch()
         scroll.setWidget(host)
+        polish_widget_scrollbars(scroll)
         root.addWidget(scroll, stretch=1)
 
-        buttons = QHBoxLayout()
+        bar = QWidget()
+        bar.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        buttons = QHBoxLayout(bar)
+        buttons.setContentsMargins(0, 0, 0, 0)
         buttons.setSpacing(8)
         self.send_btn = QPushButton("요청 전송")
         mark_primary_button(self.send_btn)
-        self.send_btn.setFixedHeight(36)
+        self.send_btn.setMinimumHeight(36)
         self.login_btn = QPushButton("로그인 시도")
         mark_secondary_button(self.login_btn)
-        self.login_btn.setFixedHeight(36)
+        self.login_btn.setMinimumHeight(36)
         self.stop_btn = QPushButton("중지")
         mark_secondary_button(self.stop_btn)
-        self.stop_btn.setFixedHeight(36)
+        self.stop_btn.setMinimumHeight(36)
         self.stop_btn.setEnabled(False)
         self.status_label = QLabel("대기")
         self.status_label.setProperty("role", "muted")
@@ -135,23 +162,28 @@ class WafCustomView(QWidget):
         buttons.addWidget(self.login_btn)
         buttons.addWidget(self.stop_btn)
         buttons.addWidget(self.status_label, stretch=1)
-        root.addLayout(buttons)
+        root.addWidget(bar)
+
         self.log = QTextEdit()
         self.log.setReadOnly(True)
         self.log.setAcceptRichText(False)
         self.log.setFont(QFont("Consolas", 10))
         self.log.setPlaceholderText("전송 결과가 여기에 표시됩니다.")
-        self.log.setMinimumHeight(140)
+        self.log.setFixedHeight(128)
         root.addWidget(self.log)
+
         self.send_btn.clicked.connect(lambda: self._start(False))
         self.login_btn.clicked.connect(lambda: self._start(True))
         self.stop_btn.clicked.connect(self._stop)
-        self.method.currentTextChanged.connect(self._sync_body)
-        self.body_mode.currentTextChanged.connect(self._sync_body)
-        self.auth_type.currentTextChanged.connect(self._sync_login)
-        self.use_numbers.toggled.connect(self._sync_login)
-        self._sync_body()
-        self._sync_login()
+        self.method.currentTextChanged.connect(self._on_method)
+        self.auth_type.currentTextChanged.connect(self._sync_login_fields)
+        self.use_numbers.toggled.connect(self._sync_login_fields)
+        self.login_enabled.toggled.connect(self._sync_login_panel)
+        self._wire_preview()
+        self._on_method()
+        self._sync_login_fields()
+        self._sync_login_panel()
+        self._refresh_preview()
 
     def shutdown(self) -> None:
         worker = self._worker
@@ -189,6 +221,8 @@ class WafCustomView(QWidget):
         self.insecure = NcurityCheckBox("HTTPS 인증서 검증 안 함")
         self.insecure.setChecked(True)
         grid.addWidget(self.insecure, 4, 0, 1, 2)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
         self.protocol.currentTextChanged.connect(self._on_protocol)
         return card
 
@@ -198,36 +232,26 @@ class WafCustomView(QWidget):
         layout = QVBoxLayout(card)
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(8)
-        heading = QLabel("요청")
-        heading.setProperty("role", "infoTitle")
-        layout.addWidget(heading)
+        layout.addWidget(_heading("요청"))
         row = QHBoxLayout()
+        row.setSpacing(12)
         self.method = create_form_combobox()
         self.method.addItems(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
+        self.method.setFixedWidth(168)
         self.uri = QLineEdit("/")
         self.uri.setFixedHeight(36)
+        self.uri.setMinimumWidth(180)
         method_col = QVBoxLayout()
+        method_col.setSpacing(6)
         method_col.addWidget(_label("Method"))
         method_col.addWidget(self.method)
         uri_col = QVBoxLayout()
+        uri_col.setSpacing(6)
         uri_col.addWidget(_label("URI"))
         uri_col.addWidget(self.uri)
         row.addLayout(method_col)
         row.addLayout(uri_col, stretch=1)
         layout.addLayout(row)
-        layout.addWidget(_label("Query 파라미터  ·  주소 뒤에 붙습니다"))
-        self.query = _PairEditor("Query 추가")
-        layout.addWidget(self.query)
-        layout.addWidget(_label("Body 파라미터  ·  POST, PUT, PATCH, DELETE"))
-        self.body_mode = create_form_combobox()
-        self.body_mode.addItems(["폼 파라미터", "직접 입력"])
-        layout.addWidget(self.body_mode)
-        self.body_fields = _PairEditor("Body 추가")
-        layout.addWidget(self.body_fields)
-        self.raw_body = QPlainTextEdit()
-        self.raw_body.setPlaceholderText('{"username":"user","password":"secret"}')
-        self.raw_body.setFixedHeight(90)
-        layout.addWidget(self.raw_body)
         return card
 
     def _build_headers(self) -> QFrame:
@@ -236,11 +260,14 @@ class WafCustomView(QWidget):
         layout = QVBoxLayout(card)
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(8)
-        heading = QLabel("Header")
-        heading.setProperty("role", "infoTitle")
-        layout.addWidget(heading)
+        layout.addWidget(_heading("Header"))
+        layout.addWidget(_label("User-Agent  ·  고정"))
+        agent = QLabel(DEFAULT_USER_AGENT)
+        agent.setWordWrap(True)
+        agent.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(agent)
+
         self.use_content_type = NcurityCheckBox("Content-Type")
-        self.use_content_type.setChecked(True)
         self.content_type = create_form_combobox()
         self.content_type.addItems(
             [
@@ -250,27 +277,26 @@ class WafCustomView(QWidget):
                 "application/xml",
             ]
         )
-        self.use_user_agent = NcurityCheckBox("User-Agent")
-        self.use_user_agent.setChecked(True)
-        self.user_agent = QLineEdit("Mozilla/5.0")
-        self.user_agent.setFixedHeight(36)
         self.use_accept = NcurityCheckBox("Accept")
         self.accept = QLineEdit("*/*")
         self.accept.setFixedHeight(36)
         self.use_referer = NcurityCheckBox("Referer")
         self.referer = QLineEdit()
         self.referer.setFixedHeight(36)
-        layout.addWidget(self.use_content_type)
-        layout.addWidget(self.content_type)
-        layout.addWidget(self.use_user_agent)
-        layout.addWidget(self.user_agent)
-        layout.addWidget(self.use_accept)
-        layout.addWidget(self.accept)
-        layout.addWidget(self.use_referer)
-        layout.addWidget(self.referer)
+        self.referer.setPlaceholderText("https://curl.ncurity.com/")
+        layout.addWidget(_option_row(self.use_content_type, self.content_type))
+        layout.addWidget(_option_row(self.use_accept, self.accept))
+        layout.addWidget(_option_row(self.use_referer, self.referer))
         layout.addWidget(_label("Custom Header"))
         self.custom_headers = _PairEditor("헤더 추가")
         layout.addWidget(self.custom_headers)
+        layout.addWidget(_label("전송될 헤더"))
+        self.header_preview = QLabel()
+        self.header_preview.setWordWrap(True)
+        self.header_preview.setTextFormat(Qt.TextFormat.PlainText)
+        self.header_preview.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.header_preview.setProperty("role", "muted")
+        layout.addWidget(self.header_preview)
         return card
 
     def _build_cookies(self) -> QFrame:
@@ -279,24 +305,38 @@ class WafCustomView(QWidget):
         layout = QVBoxLayout(card)
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(8)
-        heading = QLabel("Cookie")
-        heading.setProperty("role", "infoTitle")
-        layout.addWidget(heading)
+        layout.addWidget(_heading("Cookie"))
         self.cookies = _PairEditor("쿠키 추가")
         layout.addWidget(self.cookies)
         return card
 
-    def _build_login(self) -> QFrame:
+    def _build_params(self) -> QFrame:
         card = QFrame()
         mark_step_card(card)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(8)
-        heading = QLabel("로그인")
-        heading.setProperty("role", "infoTitle")
-        layout.addWidget(heading)
-        self.login_first = NcurityCheckBox("요청 전송 전에 로그인")
-        layout.addWidget(self.login_first)
+        layout.addWidget(_heading("파라미터"))
+        self.param_hint = _label("")
+        self.param_hint.setWordWrap(True)
+        layout.addWidget(self.param_hint)
+        self.params = _PairEditor("파라미터 추가")
+        self.login_enabled = NcurityCheckBox("로그인")
+        self.params.place_beside_add(self.login_enabled)
+        layout.addWidget(self.params)
+        self.login_hint = _label("체크하면 아래에 로그인 입력칸이 열립니다.")
+        self.login_hint.setWordWrap(True)
+        layout.addWidget(self.login_hint)
+        return card
+
+    def _build_login(self) -> QFrame:
+        card = QFrame()
+        mark_step_card(card)
+        self.login_card = card
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
+        layout.addWidget(_heading("로그인"))
         self.login_uri = QLineEdit("/login")
         self.login_uri.setFixedHeight(36)
         layout.addWidget(_label("Login URI"))
@@ -311,14 +351,9 @@ class WafCustomView(QWidget):
         self.password.setFixedHeight(36)
         self.password.setPlaceholderText("비밀번호")
         account = QHBoxLayout()
-        user_col = QVBoxLayout()
-        user_col.addWidget(_label("계정"))
-        user_col.addWidget(self.username)
-        pass_col = QVBoxLayout()
-        pass_col.addWidget(_label("비밀번호"))
-        pass_col.addWidget(self.password)
-        account.addLayout(user_col, stretch=1)
-        account.addLayout(pass_col, stretch=1)
+        account.setSpacing(12)
+        account.addLayout(_stacked("계정", self.username), stretch=1)
+        account.addLayout(_stacked("비밀번호", self.password), stretch=1)
         layout.addLayout(account)
         self.use_numbers = NcurityCheckBox("계정 뒤에 번호 붙이기  ·  user1, user2 …")
         self.use_numbers.setChecked(True)
@@ -337,25 +372,31 @@ class WafCustomView(QWidget):
             spin.setValue(value)
             configure_port_spinbox(spin)
         numbers = QGridLayout()
+        numbers.setHorizontalSpacing(12)
+        numbers.setVerticalSpacing(8)
         numbers.addWidget(_label("시작 번호"), 0, 0)
         numbers.addWidget(self.number_from, 1, 0)
         numbers.addWidget(_label("끝 번호"), 0, 1)
         numbers.addWidget(self.number_to, 1, 1)
-        numbers.addWidget(_label("계정당 시도 횟수"), 0, 2)
-        numbers.addWidget(self.attempts, 1, 2)
-        numbers.addWidget(_label("간격(초)"), 0, 3)
-        numbers.addWidget(self.pause, 1, 3)
+        numbers.addWidget(_label("계정당 시도 횟수"), 2, 0)
+        numbers.addWidget(self.attempts, 3, 0)
+        numbers.addWidget(_label("간격(초)"), 2, 1)
+        numbers.addWidget(self.pause, 3, 1)
+        numbers.setColumnStretch(0, 1)
+        numbers.setColumnStretch(1, 1)
         layout.addLayout(numbers)
         self.form_fields = QWidget()
         form_layout = QHBoxLayout(self.form_fields)
         form_layout.setContentsMargins(0, 0, 0, 0)
+        form_layout.setSpacing(12)
         self.user_field = QLineEdit("username")
         self.password_field = QLineEdit("password")
         self.user_field.setFixedHeight(36)
         self.password_field.setFixedHeight(36)
-        form_layout.addWidget(self.user_field)
-        form_layout.addWidget(self.password_field)
-        self.form_hint = _label("HTML Form 필드 이름  ·  앞이 계정, 뒤가 비밀번호")
+        form_layout.addLayout(_stacked("계정 필드 이름", self.user_field), stretch=1)
+        form_layout.addLayout(_stacked("비밀번호 필드 이름", self.password_field), stretch=1)
+        self.form_hint = _label("HTML Form은 이 필드 이름으로 계정을 보냅니다.")
+        self.form_hint.setWordWrap(True)
         layout.addWidget(self.form_hint)
         layout.addWidget(self.form_fields)
         self.body_template = QPlainTextEdit()
@@ -366,6 +407,7 @@ class WafCustomView(QWidget):
             ["application/json", "application/x-www-form-urlencoded", "text/plain"]
         )
         self.body_hint = _label("Request Body  ·  {user} 와 {password} 가 계정으로 바뀝니다")
+        self.body_hint.setWordWrap(True)
         layout.addWidget(self.body_hint)
         layout.addWidget(self.body_type)
         layout.addWidget(self.body_template)
@@ -374,21 +416,38 @@ class WafCustomView(QWidget):
         layout.addWidget(self.carry_cookies)
         return card
 
+    def _wire_preview(self) -> None:
+        self.host.textChanged.connect(self._refresh_preview)
+        self.protocol.currentTextChanged.connect(self._refresh_preview)
+        self.port.valueChanged.connect(self._refresh_preview)
+        self.method.currentTextChanged.connect(self._refresh_preview)
+        self.use_content_type.toggled.connect(self._refresh_preview)
+        self.content_type.currentTextChanged.connect(self._refresh_preview)
+        self.use_accept.toggled.connect(self._refresh_preview)
+        self.accept.textChanged.connect(self._refresh_preview)
+        self.use_referer.toggled.connect(self._refresh_preview)
+        self.referer.textChanged.connect(self._refresh_preview)
+        self.custom_headers.changed.connect(self._refresh_preview)
+        self.params.changed.connect(self._refresh_preview)
+
     def _on_protocol(self, text: str) -> None:
         if text == "HTTPS":
             self.port.setValue(443)
         elif text == "HTTP":
             self.port.setValue(80)
 
-    def _sync_body(self) -> None:
-        verb = self.method.currentText()
-        enabled = verb in {"POST", "PUT", "PATCH", "DELETE"}
-        raw = self.body_mode.currentText() == "직접 입력"
-        self.body_mode.setEnabled(enabled)
-        self.body_fields.setEnabled(enabled and not raw)
-        self.raw_body.setEnabled(enabled and raw)
+    def _on_method(self) -> None:
+        if self.method.currentText() in _BODY_METHODS:
+            self.param_hint.setText("이 파라미터는 본문으로 전송됩니다.")
+        else:
+            self.param_hint.setText("이 파라미터는 주소 뒤에 붙어 전송됩니다.")
 
-    def _sync_login(self) -> None:
+    def _sync_login_panel(self) -> None:
+        shown = self.login_enabled.isChecked()
+        self.login_card.setVisible(shown)
+        self.login_btn.setVisible(shown)
+
+    def _sync_login_fields(self) -> None:
         kind = self.auth_type.currentText()
         show_form = kind == "HTML Form"
         show_body = kind == "Request Body"
@@ -401,23 +460,45 @@ class WafCustomView(QWidget):
         self.number_from.setEnabled(numbered)
         self.number_to.setEnabled(numbered)
 
-    def _headers(self) -> list[tuple[str, str]]:
-        headers: list[tuple[str, str]] = []
+    def _request_headers(self) -> list[tuple[str, str]]:
+        headers: list[tuple[str, str]] = [("User-Agent", DEFAULT_USER_AGENT)]
         if self.use_content_type.isChecked():
-            headers.append(("Content-Type", self.content_type.currentText()))
-        if self.use_user_agent.isChecked() and self.user_agent.text().strip():
-            headers.append(("User-Agent", self.user_agent.text().strip()))
+            headers.append(("Content-Type", self.content_type.currentText().strip()))
         if self.use_accept.isChecked() and self.accept.text().strip():
             headers.append(("Accept", self.accept.text().strip()))
         if self.use_referer.isChecked() and self.referer.text().strip():
             headers.append(("Referer", self.referer.text().strip()))
-        headers.extend(self.custom_headers.pairs())
+        for name, value in self.custom_headers.pairs():
+            if name.strip().lower() in {"host", "user-agent"}:
+                continue
+            headers.append((name, value))
+        if self._needs_form_content_type(headers):
+            headers.append(("Content-Type", "application/x-www-form-urlencoded"))
         return headers
 
+    def _needs_form_content_type(self, headers: list[tuple[str, str]]) -> bool:
+        if self.method.currentText() not in _BODY_METHODS:
+            return False
+        if any(name.lower() == "content-type" for name, _value in headers):
+            return False
+        return any(name.strip() or value.strip() for name, value in self.params.pairs())
+
+    def _refresh_preview(self) -> None:
+        host = self.host.text().strip() or "(Host)"
+        port = int(self.port.value())
+        https = self.protocol.currentText() == "HTTPS"
+        default_port = (https and port == 443) or (not https and port == 80)
+        authority = host if default_port else f"{host}:{port}"
+        lines = [f"Host: {authority}"]
+        lines.extend(f"{name}: {value}" for name, value in self._request_headers())
+        self.header_preview.setText("\n".join(lines))
+
     def _login_plan(self) -> LoginPlan:
-        kind = {"HTML Form": "form", "HTTP Basic Authentication": "basic", "Request Body": "body"}[
-            self.auth_type.currentText()
-        ]
+        kind = {
+            "HTML Form": "form",
+            "HTTP Basic Authentication": "basic",
+            "Request Body": "body",
+        }[self.auth_type.currentText()]
         return LoginPlan(
             uri=self.login_uri.text(),
             kind=kind,
@@ -443,9 +524,9 @@ class WafCustomView(QWidget):
             return
         try:
             target = self._target()
-            login = self._login_plan() if login_only or self.login_first.isChecked() else None
+            login = self._login_plan() if login_only or self.login_enabled.isChecked() else None
         except ValueError as exc:
-            QMessageBox.warning(self, "요청 작성", str(exc))
+            QMessageBox.warning(self, "Custom 공격 구문", str(exc))
             return
         if login_only and login is None:
             return
@@ -456,11 +537,8 @@ class WafCustomView(QWidget):
             target,
             method=self.method.currentText(),
             uri=self.uri.text(),
-            query=self.query.pairs(),
-            body_mode="raw" if self.body_mode.currentText() == "직접 입력" else "form",
-            body_fields=self.body_fields.pairs(),
-            raw_body=self.raw_body.toPlainText(),
-            headers=self._headers(),
+            params=self.params.pairs(),
+            headers=self._request_headers(),
             cookies=self.cookies.pairs(),
             insecure=self.insecure.isChecked(),
             login=login,
@@ -502,7 +580,35 @@ class WafCustomView(QWidget):
         self.stop_btn.setEnabled(running)
 
 
+def _heading(text: str) -> QLabel:
+    label = QLabel(text)
+    label.setProperty("role", "infoTitle")
+    return label
+
+
 def _label(text: str) -> QLabel:
     label = QLabel(text)
     label.setProperty("role", "muted")
     return label
+
+
+def _stacked(caption: str, field: QWidget) -> QVBoxLayout:
+    column = QVBoxLayout()
+    column.setSpacing(6)
+    column.addWidget(_label(caption))
+    column.addWidget(field)
+    return column
+
+
+def _option_row(check: NcurityCheckBox, field: QWidget) -> QWidget:
+    row = QWidget()
+    layout = QHBoxLayout(row)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(8)
+    check.setMinimumWidth(130)
+    field.setMinimumWidth(180)
+    layout.addWidget(check)
+    layout.addWidget(field, stretch=1)
+    check.toggled.connect(field.setEnabled)
+    field.setEnabled(check.isChecked())
+    return row

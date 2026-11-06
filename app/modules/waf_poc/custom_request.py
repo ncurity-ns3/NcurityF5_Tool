@@ -11,6 +11,10 @@ from app.modules.waf_poc.curlutil import Target
 
 _METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 _BODY_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36"
+)
 _HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,64}$")
 _COOKIE_NAME = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]{1,64}$")
 _MAX_ACCOUNTS = 20
@@ -58,10 +62,7 @@ def build_main_call(
     *,
     method: str,
     uri: str,
-    query: list[tuple[str, str]],
-    body_mode: str,
-    body_fields: list[tuple[str, str]],
-    raw_body: str,
+    params: list[tuple[str, str]],
     headers: list[tuple[str, str]],
     cookies: list[tuple[str, str]],
     insecure: bool,
@@ -70,20 +71,16 @@ def build_main_call(
     if verb not in _METHODS:
         raise ValueError("Method를 확인해 주세요.")
     path = _path(uri)
-    pairs = _clean_pairs(query, "파라미터")
+    pairs = _clean_pairs(params, "파라미터")
     url = target.origin + path
-    if pairs:
-        url = f"{url}?{urlencode(pairs)}"
     extra = list(headers)
     data: str | None = None
-    if verb in _BODY_METHODS and body_mode == "raw":
-        _reject_break(raw_body, "본문")
-        data = raw_body
-    elif verb in _BODY_METHODS and body_mode == "form":
-        fields = _clean_pairs(body_fields, "파라미터")
-        if fields:
-            data = urlencode(fields)
+    if verb in _BODY_METHODS:
+        if pairs:
+            data = urlencode(pairs)
             extra = _ensure_content_type(extra, "application/x-www-form-urlencoded")
+    elif pairs:
+        url = f"{url}?{urlencode(pairs)}"
     return PreparedCall(
         "요청",
         _argv(

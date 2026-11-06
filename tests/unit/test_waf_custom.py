@@ -65,25 +65,37 @@ def test_numbered_accounts_and_attempt_repeat() -> None:
     ]
 
 
-def test_request_splits_query_and_body() -> None:
+def test_get_params_go_on_the_path() -> None:
+    call = build_main_call(
+        _target(),
+        "curl.exe",
+        method="GET",
+        uri="/app",
+        params=[("q", "1"), ("name", "a b")],
+        headers=[("User-Agent", "lab")],
+        cookies=[("sid", "1")],
+        insecure=True,
+    )
+    assert call.argv[-1] == "http://curl.ncurity.com/app?q=1&name=a+b"
+    assert "--data-binary" not in call.argv
+    assert "Cookie: sid=1" in call.argv
+    assert "curl.ncurity.com:80:192.168.41.91" in call.argv
+
+
+def test_post_params_go_in_the_body() -> None:
     call = build_main_call(
         _target(),
         "curl.exe",
         method="POST",
         uri="/app",
-        query=[("q", "1")],
-        body_mode="form",
-        body_fields=[("name", "a b")],
-        raw_body="",
+        params=[("name", "a b")],
         headers=[("User-Agent", "lab")],
-        cookies=[("sid", "1")],
+        cookies=[],
         insecure=True,
     )
-    assert "http://curl.ncurity.com/app?q=1" in call.argv
+    assert call.argv[-1] == "http://curl.ncurity.com/app"
     assert "name=a+b" in call.argv
-    assert "Cookie: sid=1" in call.argv
-    assert "--resolve" in call.argv
-    assert "curl.ncurity.com:80:192.168.41.91" in call.argv
+    assert "Content-Type: application/x-www-form-urlencoded" in call.argv
 
 
 def test_login_form_basic_and_body() -> None:

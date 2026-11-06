@@ -38,7 +38,15 @@ if (-not (Test-Path -LiteralPath $Exe)) {
 
 $AppVersion = Get-AppVersion
 $parts = @($AppVersion.Split(".") + @("0", "0", "0", "0"))[0..3]
-if ($AppVersion.Split(".").Count -eq 3 -and [int]$parts[3] -lt 1) { $parts[3] = "1" }
+$revisionFile = Join-Path $Root "packaging\windows_revision.txt"
+$revision = 1
+if (Test-Path -LiteralPath $revisionFile) {
+    $parsed = 0
+    if ([int]::TryParse((Get-Content -LiteralPath $revisionFile -Raw).Trim(), [ref]$parsed)) {
+        $revision = $parsed
+    }
+}
+if ($AppVersion.Split(".").Count -eq 3) { $parts[3] = "$revision" }
 $ProductVersion = ($parts -join ".")
 $Wix = Find-Wix
 $Stage = Join-Path $env:TEMP "ncurity-f5tool-msi-src"

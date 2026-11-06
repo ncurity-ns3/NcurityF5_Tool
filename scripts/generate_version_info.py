@@ -12,11 +12,19 @@ def _read_version(root: Path) -> tuple[str, int, int, int, int]:
     version = match.group(1) if match else "1.1.0"
     parts = (version.split(".") + ["0", "0", "0"])[:4]
     nums = tuple(int(part) for part in parts)
-    # A three-part release is 1.3.1.1 on Windows. 1.3.1.0 would not replace
-    # an already installed 1.3.1 package.
+    # The fourth number is the Windows installer revision. Raise
+    # packaging/windows_revision.txt so a same 1.3.1 package replaces the exe.
     if version.count(".") == 2:
-        nums = (nums[0], nums[1], nums[2], max(nums[3], 1))
+        nums = (nums[0], nums[1], nums[2], _windows_revision(root))
     return version, nums
+
+
+def _windows_revision(root: Path) -> int:
+    path = root / "packaging" / "windows_revision.txt"
+    if not path.exists():
+        return 1
+    text = path.read_text(encoding="utf-8").strip()
+    return int(text) if text.isdigit() else 1
 
 
 def main() -> int:
