@@ -5,7 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import QRectF, QThread, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QFont, QKeySequence, QPainter, QPainterPath, QPen, QShortcut
+from PyQt6.QtGui import (
+    QBrush,
+    QColor,
+    QFont,
+    QFontMetrics,
+    QKeySequence,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QShortcut,
+)
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -90,7 +100,7 @@ class _NodeItem(QGraphicsItem):
         color = QColor(_NODE_COLORS.get(int(self._node.get("color") or 1), _NODE_COLORS[1]))
         rect = self.boundingRect()
         caption = str(self._node.get("caption") or "")
-        font = QFont("Malgun Gothic", 10)
+        font = QFont("Malgun Gothic", 9)
         font.setBold(True)
         painter.setFont(font)
         if kind in {"start", "entry"}:
@@ -117,11 +127,19 @@ class _NodeItem(QGraphicsItem):
             painter.setBrush(QBrush(QColor("#ffffff")))
             painter.drawRect(rect)
             painter.setPen(QColor("#1d2a38"))
-        painter.drawText(
-            rect.adjusted(6, 2, -6, -2),
-            int(Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap),
-            caption,
-        )
+        lines = [str(line) for line in (self._node.get("lines") or []) if str(line)]
+        if not lines:
+            lines = [caption]
+        metrics = QFontMetrics(font)
+        line_h = metrics.height()
+        block_h = line_h * len(lines)
+        top = rect.y() + max(2.0, (rect.height() - block_h) / 2)
+        for index, line in enumerate(lines):
+            painter.drawText(
+                QRectF(rect.x() + 4, top + index * line_h, rect.width() - 8, line_h),
+                int(Qt.AlignmentFlag.AlignCenter),
+                line,
+            )
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         self._on_click(self._node, self._graph)
@@ -223,9 +241,97 @@ class _FlatGraphView(QGraphicsView):
         event.ignore()
 
 
+class _PolicyBanner(QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+        self._caption = ""
+        self.setFixedHeight(52)
+        self.setSizePolicy(self.sizePolicy().horizontalPolicy(), self.sizePolicy().verticalPolicy())
+
+    def set_caption(self, caption: str) -> None:
+        self._caption = caption
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        del event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#f3f7fd"))
+        painter.fillRect(0, 0, 6, self.height(), QColor("#0260EA"))
+        painter.setPen(QColor("#5b7194"))
+        painter.setFont(QFont("Malgun Gothic", 8, QFont.Weight.Bold))
+        painter.drawText(
+            18, 8, self.width() - 28, 16, int(Qt.AlignmentFlag.AlignLeft), "ACCESS POLICY"
+        )
+        painter.setPen(QColor("#0260EA"))
+        painter.setFont(QFont("Malgun Gothic", 13, QFont.Weight.Bold))
+        painter.drawText(
+            18, 24, self.width() - 28, 24, int(Qt.AlignmentFlag.AlignLeft), self._caption
+        )
+
+
+class _FoldHeader(QWidget):
+    def __init__(self, caption: str, on_toggle) -> None:
+        super().__init__()
+        self._caption = caption
+        self._open = False
+        self._on_toggle = on_toggle
+        self.setFixedHeight(46)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setSizePolicy(self.sizePolicy().horizontalPolicy(), self.sizePolicy().verticalPolicy())
+
+    def set_open(self, opened: bool) -> None:
+        self._open = opened
+        self.update()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        self._on_toggle()
+        event.accept()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        del event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#fff7ec" if self._open else "#f7f4ef"))
+        painter.fillRect(0, 0, 6, self.height(), QColor("#d07a12"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor("#6b542c")))
+        triangle = QPainterPath()
+        if self._open:
+            triangle.moveTo(18, 18)
+            triangle.lineTo(30, 18)
+            triangle.lineTo(24, 28)
+        else:
+            triangle.moveTo(18, 16)
+            triangle.lineTo(18, 30)
+            triangle.lineTo(28, 23)
+        triangle.closeSubpath()
+        painter.drawPath(triangle)
+        painter.setPen(QColor("#9a5b12"))
+        painter.setFont(QFont("Malgun Gothic", 8, QFont.Weight.Bold))
+        painter.drawText(36, 6, 70, 16, int(Qt.AlignmentFlag.AlignLeft), "MACRO")
+        painter.setPen(QColor("#1d2a38"))
+        painter.setFont(QFont("Malgun Gothic", 11, QFont.Weight.Bold))
+        painter.drawText(
+            36, 22, self.width() - 120, 20, int(Qt.AlignmentFlag.AlignLeft), self._caption
+        )
+        painter.setPen(QColor("#9a5b12"))
+        painter.setFont(QFont("Malgun Gothic", 9, QFont.Weight.Bold))
+        action = "접기" if self._open else "펼치기"
+        painter.drawText(
+            self.width() - 72,
+            0,
+            60,
+            self.height(),
+            int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
+            action,
+        )
+
+
 class _MacroSection(QWidget):
     def __init__(self, policy: dict, on_node, on_toggle) -> None:
         super().__init__()
+        self.setObjectName("vpeMacroCard")
         self.policy = policy
         self.name = str(policy.get("name") or "")
         self.caption = str(policy.get("caption") or self.name.rsplit("/", 1)[-1])
@@ -235,11 +341,7 @@ class _MacroSection(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        self.bar = QPushButton(f"▸    Macro: {self.caption}")
-        self.bar.setObjectName("vpeMacroBar")
-        self.bar.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.bar.setFixedHeight(36)
-        self.bar.clicked.connect(lambda: on_toggle(self.name))
+        self.bar = _FoldHeader(self.caption, lambda: on_toggle(self.name))
         layout.addWidget(self.bar)
         self.scene = QGraphicsScene(self)
         self.view = _FlatGraphView(self.scene)
@@ -261,13 +363,7 @@ class _MacroSection(QWidget):
         self._drawn = True
 
     def set_open(self, opened: bool, scale: float) -> None:
-        arrow = "▾" if opened else "▸"
-        self.bar.setText(f"{arrow}    Macro: {self.caption}")
-        self.bar.setProperty("open", opened)
-        style = self.bar.style()
-        if style is not None:
-            style.unpolish(self.bar)
-            style.polish(self.bar)
+        self.bar.set_open(opened)
         if not opened:
             self.view.hide()
             return
@@ -373,13 +469,21 @@ class VpeViewerView(QWidget):
         self._page = QWidget()
         self._page.setObjectName("vpePage")
         self._page_layout = QVBoxLayout(self._page)
-        self._page_layout.setContentsMargins(0, 0, 0, 0)
-        self._page_layout.setSpacing(0)
-        self._page_layout.addWidget(self._view)
-        self._macro_split = QFrame()
-        self._macro_split.setObjectName("vpeMacroSplit")
-        self._macro_split.setFixedHeight(18)
-        self._macro_split.hide()
+        self._page_layout.setContentsMargins(10, 10, 10, 10)
+        self._page_layout.setSpacing(10)
+        self._policy_card = QFrame()
+        self._policy_card.setObjectName("vpePolicyCard")
+        policy_layout = QVBoxLayout(self._policy_card)
+        policy_layout.setContentsMargins(0, 0, 0, 0)
+        policy_layout.setSpacing(0)
+        self._policy_banner = _PolicyBanner()
+        policy_layout.addWidget(self._policy_banner)
+        policy_layout.addWidget(self._view)
+        self._page_layout.addWidget(self._policy_card)
+        self._macro_heading = QLabel("매크로")
+        self._macro_heading.setObjectName("vpeMacroHeading")
+        self._macro_heading.hide()
+        self._page_layout.addWidget(self._macro_heading)
         self._page_layout.addStretch(1)
         self._view.hide()
         self._scroll = QScrollArea()
@@ -416,29 +520,24 @@ class VpeViewerView(QWidget):
             }
             QListWidget#vpeProfileList::item { padding: 6px 8px; }
             QListWidget#vpeProfileList::item:selected { background: #EDF5FF; color: #0260EA; }
-            QScrollArea#vpeScroll, QWidget#vpePage { background: #e8eaed; border: none; }
+            QScrollArea#vpeScroll, QWidget#vpePage { background: #e4e7ec; border: none; }
             QGraphicsView#vpeGraph { background: #F7F8FA; border: none; }
-            QFrame#vpeMacroSplit {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #eef0f2, stop:1 #dfe3e7);
-                border: none;
-                border-top: 1px solid #c5ccd3;
-                border-bottom: 1px solid #b7bec6;
+            QFrame#vpePolicyCard {
+                background: #ffffff;
+                border: 1px solid #b9cceb;
+                border-radius: 8px;
             }
-            QPushButton#vpeMacroBar {
-                text-align: left;
-                padding: 7px 14px;
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f7f8f9, stop:1 #e7eaed);
-                border: none;
-                border-top: 1px solid #c5ccd3;
-                border-bottom: 1px solid #d5dbe2;
-                color: #0260EA;
+            QFrame#vpeMacroCard {
+                background: #ffffff;
+                border: 1px solid #e4cba3;
+                border-radius: 8px;
+            }
+            QLabel#vpeMacroHeading {
+                color: #6b542c;
                 font-weight: 700;
-                font-size: 13px;
-            }
-            QPushButton#vpeMacroBar:hover { background: #e7eef6; }
-            QPushButton#vpeMacroBar[open="true"] {
-                background: #e4eef8;
-                border-bottom: 1px solid #c5d4e6;
+                background: transparent;
+                border: none;
+                padding: 2px 4px;
             }
             """
         )
@@ -598,14 +697,13 @@ class VpeViewerView(QWidget):
         self._view.show()
         self._clear_sections()
         self._open_macros = set()
-        self._main_laid = _paint_policy(self._scene, policy, self._on_node, titled=True)
+        self._policy_banner.set_caption(str(policy.get("caption") or policy.get("name") or ""))
+        self._main_laid = _paint_policy(self._scene, policy, self._on_node, titled=False)
         self._main_width = float(self._main_laid["width"])
         focus_name = self._match_macro_name(focus, macros)
         if focus_name:
             self._open_macros.add(focus_name)
-        if macros:
-            self._page_layout.insertWidget(self._page_layout.count() - 1, self._macro_split)
-            self._macro_split.show()
+        self._macro_heading.setVisible(bool(macros))
         for macro in macros:
             section = _MacroSection(macro, self._on_node, self._toggle_macro)
             self._sections.append(section)
@@ -620,8 +718,7 @@ class VpeViewerView(QWidget):
         self._reveal(focus)
 
     def _clear_sections(self) -> None:
-        self._page_layout.removeWidget(self._macro_split)
-        self._macro_split.hide()
+        self._macro_heading.hide()
         for section in self._sections:
             self._page_layout.removeWidget(section)
             section.deleteLater()

@@ -14,6 +14,45 @@ def _node_size(kind: str) -> tuple[int, int]:
     return 148, 40
 
 
+def _text_px(text: str) -> int:
+    width = 0
+    for char in text:
+        width += 16 if ord(char) > 127 else 9
+    return width
+
+
+def _wrap_caption(caption: str) -> list[str]:
+    text = str(caption or "").strip()
+    if not text:
+        return [""]
+    words = [word for word in re.split(r"[_\-]+", text) if word]
+    if not words:
+        return [text]
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        trial = word if not current else f"{current}_{word}"
+        if current and _text_px(trial) > 150:
+            lines.append(current)
+            current = word
+        else:
+            current = trial
+    if current:
+        lines.append(current)
+    if len(lines) > 3:
+        lines = lines[:2] + ["_".join(lines[2:])]
+    return lines
+
+
+def _caption_box(kind: str, caption: str) -> tuple[int, int, list[str]]:
+    base_w, base_h = _node_size(kind)
+    lines = _wrap_caption(caption)
+    text_w = max((_text_px(line) for line in lines), default=0)
+    width = max(base_w, text_w + 28)
+    height = max(base_h, 14 + 16 * len(lines))
+    return width, height, lines
+
+
 def _is_except_edge(edge: dict) -> bool:
     return bool(re.fullmatch(r"except", str(edge.get("caption") or ""), flags=re.IGNORECASE))
 
@@ -46,8 +85,10 @@ def layout_graph(raw_graph: dict) -> dict:
     graph = _prune_graph(raw_graph)
     node_map = {}
     for node in graph["nodes"]:
-        width, height = _node_size(str(node.get("kind") or ""))
-        node_map[node["id"]] = {**node, "w": width, "h": height}
+        kind = str(node.get("kind") or "")
+        caption = str(node.get("caption") or "")
+        width, height, lines = _caption_box(kind, caption)
+        node_map[node["id"]] = {**node, "w": width, "h": height, "lines": lines}
     outgoing: dict[str, list] = {}
     incoming: dict[str, list] = {}
     for edge in graph["edges"]:
@@ -211,9 +252,11 @@ def layout_graph(raw_graph: dict) -> dict:
     for key in list(edge_track):
         edge_track[key] -= min_track
 
-    track_gap = 58
-    column = 248
-    origin_y = 36
+    widths = [item["w"] for item in node_map.values()] or [148]
+    heights = [item["h"] for item in node_map.values()] or [40]
+    track_gap = max(76, max(heights) + 30)
+    column = max(260, max(widths) + 128)
+    origin_y = 44
     nodes: list[dict] = []
     for node in graph["nodes"]:
         size = node_map[node["id"]]
@@ -225,10 +268,10 @@ def layout_graph(raw_graph: dict) -> dict:
         tracks = values if is_end and len(values) > 1 else [None]
         for track in tracks:
             multi = (not is_end) and high > low
-            width = 96 if multi else size["w"]
+            width = size["w"]
             top_line = origin_y + low * track_gap
             bot_line = origin_y + high * track_gap
-            height = (bot_line - top_line + 36) if multi else size["h"]
+            height = max(size["h"], bot_line - top_line + 28) if multi else size["h"]
             line = incoming_track.get(node["id"], 0) if track is None else track
             y = (top_line + bot_line) / 2 if multi else origin_y + line * track_gap
             nodes.append(
@@ -236,6 +279,7 @@ def layout_graph(raw_graph: dict) -> dict:
                     **node,
                     "width": width,
                     "height": height,
+                    "lines": size.get("lines") or [str(node.get("caption") or "")],
                     "x": 64 + rank[node["id"]] * column + width / 2,
                     "y": y,
                     "rank": rank[node["id"]],
