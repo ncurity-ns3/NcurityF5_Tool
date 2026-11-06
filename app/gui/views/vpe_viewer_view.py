@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QFrame,
     QGraphicsItem,
     QGraphicsPathItem,
+    QGraphicsRectItem,
     QGraphicsScene,
     QGraphicsSimpleTextItem,
     QGraphicsView,
@@ -163,6 +164,8 @@ class VpeViewerView(QWidget):
         self._model: dict | None = None
         self._worker: _LoadWorker | None = None
         self._policy: dict | None = None
+        self._macro_anchors: dict[str, float] = {}
+        self._main_rect: QRectF | None = None
         self._copy_text = ""
         self._find_at = 0
         self._scene = QGraphicsScene(self)
@@ -402,7 +405,7 @@ class VpeViewerView(QWidget):
         if name:
             self._show_policy(name)
 
-    def _show_policy(self, name: str) -> None:
+    def _show_policy(self, name: str, focus: str = "") -> None:
         from app.modules.vpe_viewer.server import _policy_bundle
 
         if self._model is None:
@@ -412,26 +415,67 @@ class VpeViewerView(QWidget):
             self._status.setText(f"정책을 찾을 수 없습니다: {name}")
             return
         policy = bundle["policies"][0]
+        if policy.get("type") == "macro" and not focus:
+            owners = [str(owner) for owner in (policy.get("owners") or []) if owner]
+            if owners:
+                self._show_policy(owners[0], focus=str(policy.get("name") or name))
+                return
         self._policy = policy
         self._graphs = {item.get("name"): item for item in bundle["policies"] if item.get("name")}
-        self._draw(policy)
+        macros = [
+            item
+            for item in bundle["policies"][1:]
+            if item.get("name") and item.get("name") != policy.get("name")
+        ]
+        self._draw_stack(policy, macros, focus)
         self._fill_macros(policy)
         self._show_overview(policy)
         caption = policy.get("caption") or name.rsplit("/", 1)[-1]
         self._status.setText(str(caption))
 
-    def _draw(self, policy: dict) -> None:
+    def _draw_stack(self, policy: dict, macros: list[dict], focus: str = "") -> None:
         self._hint.hide()
         self._view.show()
         self._scene.clear()
-        title = QGraphicsSimpleTextItem(str(policy.get("caption") or ""))
-        title.setFont(QFont("Malgun Gothic", 12, QFont.Weight.Bold))
-        title.setBrush(QBrush(QColor("#0260EA")))
-        title.setPos(24, 8)
-        self._scene.addItem(title)
+        self._macro_anchors = {}
+        cursor = self._paint_section(policy, 8, macro=False)
+        self._main_rect = QRectF(self._scene.itemsBoundingRect())
+        for macro in macros:
+            cursor += 18
+            cursor = self._paint_section(macro, cursor, macro=True)
+        bounds = self._scene.itemsBoundingRect().adjusted(-24, -12, 48, 36)
+        self._scene.setSceneRect(bounds)
+        QTimer.singleShot(0, lambda: self._reveal(focus))
+
+    def _paint_section(self, policy: dict, top: float, *, macro: bool) -> float:
+        caption = str(policy.get("caption") or policy.get("name") or "")
+        if macro:
+            name = str(policy.get("name") or "")
+            self._macro_anchors[name] = top
+            last = name.rsplit("/", 1)[-1]
+            self._macro_anchors.setdefault(last, top)
+            bar = QGraphicsRectItem(16, top, 420, 28)
+            bar.setBrush(QBrush(QColor("#e7eef8")))
+            bar.setPen(QPen(QColor("#c5d2e2")))
+            self._scene.addItem(bar)
+            header = QGraphicsSimpleTextItem(f"Macro: {caption}")
+            header.setFont(QFont("Malgun Gothic", 11, QFont.Weight.Bold))
+            header.setBrush(QBrush(QColor("#0260EA")))
+            header.setPos(28, top + 4)
+            self._scene.addItem(header)
+            graph_top = top + 40
+        else:
+            title = QGraphicsSimpleTextItem(caption)
+            title.setFont(QFont("Malgun Gothic", 12, QFont.Weight.Bold))
+            title.setBrush(QBrush(QColor("#0260EA")))
+            title.setPos(24, top)
+            self._scene.addItem(title)
+            graph_top = top + 36
+        return self._paint_graph(policy, graph_top)
+
+    def _paint_graph(self, policy: dict, offset_y: float) -> float:
         laid = layout_graph(policy)
-        offset_x = 24
-        offset_y = 48
+        offset_x = 24.0
         for node in laid["nodes"]:
             placed = {**node, "x": node["x"] + offset_x, "y": node["y"] + offset_y}
             self._scene.addItem(_NodeItem(placed, policy, self._on_node))
@@ -464,22 +508,44 @@ class VpeViewerView(QWidget):
                 label.setBrush(QBrush(QColor("#1f3348")))
                 label.setPos(x1 + 10, y - 16)
                 self._scene.addItem(label)
-        bounds = self._scene.itemsBoundingRect().adjusted(-24, -12, 48, 36)
-        self._scene.setSceneRect(bounds)
-        QTimer.singleShot(0, self._fit)
+        return offset_y + float(laid.get("height") or 180)
+
+    def _reveal(self, focus: str) -> None:
+        self._fit()
+        if focus:
+            self._scroll_to_macro(focus)
+
+    def _scroll_to_macro(self, name: str) -> None:
+        top = self._macro_anchors.get(name)
+        if top is None:
+            last = name.rsplit("/", 1)[-1]
+            top = self._macro_anchors.get(last)
+        if top is None:
+            for anchor, anchor_top in self._macro_anchors.items():
+                if anchor.endswith("/" + name) or anchor.endswith("/" + name.rsplit("/", 1)[-1]):
+                    top = anchor_top
+                    break
+        if top is None:
+            return
+        center_x = self._scene.sceneRect().center().x()
+        self._view.centerOn(center_x, top + 80)
+        caption = name.rsplit("/", 1)[-1]
+        self._status.setText(f"Macro: {caption}")
 
     def _on_node(self, node: dict, graph: dict) -> None:
         if node.get("kind") == "macro":
             target = str(node.get("macro") or node.get("id") or "")
-            if target:
-                self._show_policy(target)
+            short = target.rsplit("/", 1)[-1]
+            if target in self._macro_anchors or short in self._macro_anchors:
+                self._scroll_to_macro(target)
+                self._show_detail(node, graph)
                 return
         self._show_detail(node, graph)
 
     def _on_macro(self, item: QListWidgetItem) -> None:
         name = str(item.data(Qt.ItemDataRole.UserRole) or "")
         if name:
-            self._show_policy(name)
+            self._scroll_to_macro(name)
 
     def _fill_macros(self, policy: dict) -> None:
         self._macros.clear()
@@ -682,6 +748,8 @@ class VpeViewerView(QWidget):
 
     def _fit(self) -> None:
         rect = self._scene.sceneRect()
+        if self._main_rect is not None and not self._main_rect.isEmpty():
+            rect = self._main_rect
         if rect.isEmpty():
             return
         self._view.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)

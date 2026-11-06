@@ -7,27 +7,38 @@ _LINE = (
 )
 
 
-def test_years_only_2021_has_cases() -> None:
+def test_years_list_2017_and_2021() -> None:
     assert YEARS == (2017, 2021, 2025)
-    assert cases_for_year(2017) == ()
     assert cases_for_year(2025) == ()
-    cases = cases_for_year(2021)
-    assert [case.case_id for case in cases] == [
-        "a1-01",
-        "a1-02",
-        "a1-03",
-        "a3-01",
-        "a3-02",
-        "a3-03",
-        "a3-04",
-        "a3-05",
-        "a3-06",
-        "a3-07",
-    ]
-    for case in cases:
+    older = cases_for_year(2017)
+    newer = cases_for_year(2021)
+    assert [case.case_id for case in older][:3] == ["2017-01", "2017-02", "2017-03"]
+    assert older[-1].case_id == "2017-15"
+    assert {case.group for case in newer} >= {
+        "A1 Broken Access Control",
+        "A3 Injection",
+        "A4 Insecure Design",
+        "A5 Security Misconfiguration",
+        "A8 Software and Data Integrity",
+        "A10 Server-Side Request Forgery",
+    }
+    assert "a3-11" in {case.case_id for case in newer}
+    for case in (*older, *newer):
         commands = case.commands()
         assert commands
         assert all(command.startswith("curl ") for command in commands)
+
+
+def test_rewrite_2017_resolve_address() -> None:
+    line = (
+        'curl -k --resolve curl.ncurity.com:80:192.168.41.52 '
+        '"http://curl.ncurity.com/bWAPP/login.php?id=1"'
+    )
+    target = Target.parse("10.0.0.8", "lab.example", "http", 80)
+    rewritten = rewrite_curl_line(line, target)
+    assert "lab.example:80:10.0.0.8" in rewritten
+    assert "192.168.41.52" not in rewritten
+    assert "curl.ncurity.com" not in rewritten
 
 
 def test_rewrite_http_https_and_custom_port() -> None:

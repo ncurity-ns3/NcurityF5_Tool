@@ -1,0 +1,2 @@
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com/bWAPP/login.php" -X OPTIONS
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com/bWAPP/login.php" -X TRACE

