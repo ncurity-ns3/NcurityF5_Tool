@@ -26,6 +26,25 @@ def _prepare_qt_dll_paths() -> None:
         pass
 
 
+def _disable_webengine_show_flash() -> None:
+    """Windows clears a WebEngine view to white for a frame when it is shown."""
+    feature = "CalculateNativeWinOcclusion"
+    current = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+    if feature in current:
+        return
+    marker = "--disable-features="
+    if marker in current:
+        start = current.find(marker) + len(marker)
+        end = current.find(" ", start)
+        if end == -1:
+            updated = current + "," + feature
+        else:
+            updated = current[:end] + "," + feature + current[end:]
+        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = updated
+        return
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (current + " " + marker + feature).strip()
+
+
 def bootstrap_webengine_before_qapplication() -> bool:
     """
     must run before QApplication() is created.
@@ -33,11 +52,13 @@ def bootstrap_webengine_before_qapplication() -> bool:
     """
     global _WEBENGINE_READY, _WEBENGINE_ERROR
     _prepare_qt_dll_paths()
+    _disable_webengine_show_flash()
     try:
         from PyQt6.QtCore import Qt
         from PyQt6.QtWidgets import QApplication
 
         QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings)
     except Exception as exc:
         _WEBENGINE_ERROR = f"AA_ShareOpenGLContexts: {exc}"
 

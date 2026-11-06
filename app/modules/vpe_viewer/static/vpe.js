@@ -614,7 +614,7 @@ function openMacroAndScroll(macroName) {
 function draw(policy, macros) {
   while (svg.firstChild) svg.removeChild(svg.firstChild);
   const ids = addGraphDefs(svg, "main");
-  const title = svgEl("text", { x: "24", y: "22", fill: "#1f4e79", "font-size": "16", "font-weight": "700" });
+  const title = svgEl("text", { x: "24", y: "22", fill: "#0260EA", "font-size": "16", "font-weight": "700" });
   title.textContent = policy.caption + (policy.type === "macro" ? "  (Macro)" : "");
   svg.appendChild(title);
   const size = paintGraph(svg, policy, ids.markerId, ids.hatchId);
