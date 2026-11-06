@@ -106,72 +106,22 @@ Write-Host "SHA256:       $hash"
 Write-Host "Manifest:     $manifestPath"
 
 if ($Installer) {
-    $Iscc = $null
-    $candidates = @(
-        "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
-        "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-        "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
-    )
-    foreach ($c in $candidates) {
-        if (Test-Path -LiteralPath $c) { $Iscc = $c; break }
-    }
-    if (-not $Iscc) {
-        Write-Warning "Inno Setup 6 not found. Install from https://jrsoftware.org/isdl.php then re-run with -Installer"
-    }
-    else {
-        $Iss = Join-Path $Root "packaging\NcurityF5Tool.iss"
-        $InstallerOut = Join-Path $env:TEMP "ncurity-f5tool-installer"
-        if (Test-Path -LiteralPath $InstallerOut) {
-            Remove-Item -LiteralPath $InstallerOut -Recurse -Force
-        }
-        New-Item -ItemType Directory -Force -Path $InstallerOut | Out-Null
-        & $Iscc "/DMyAppVersion=$AppVersion" "/O$InstallerOut" $Iss
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        $BuiltSetup = Join-Path $InstallerOut "NcurityF5Tool-Setup-$AppVersion.exe"
-        $DistInstaller = Join-Path $Root "dist\installer"
-        New-Item -ItemType Directory -Force -Path $DistInstaller | Out-Null
-        Copy-Item -LiteralPath $BuiltSetup -Destination $DistInstaller -Force
-        $Setup = Join-Path $DistInstaller "NcurityF5Tool-Setup-$AppVersion.exe"
-        if (-not $SkipSign -and (Test-Path -LiteralPath $Setup)) {
-            & (Join-Path $PSScriptRoot "sign_windows_release.ps1") -TargetPath $Setup
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        }
-        if (Test-Path -LiteralPath $Setup) {
-            $setupHash = (Get-FileHash -LiteralPath $Setup -Algorithm SHA256).Hash
-            Add-Content -LiteralPath $manifestPath -Encoding UTF8 -Value @(
-                "",
-                "Installer: dist\installer\NcurityF5Tool-Setup-$AppVersion.exe",
-                "Installer SHA256: $setupHash"
-            )
-            Write-Host "Installer:    $Setup"
-            Write-Host "Setup SHA256: $setupHash"
-
-            $sig = Get-AuthenticodeSignature -LiteralPath $Setup
-            $signedOk = $sig.Status -eq "Valid"
-            $zipName = if ($signedOk) {
-                "NcurityF5Tool-Setup-${AppVersion}_signed.zip"
-            } else {
-                "NcurityF5Tool-Setup-${AppVersion}.zip"
-            }
-            $setupZip = Join-Path $DistInstaller $zipName
-            if (Test-Path -LiteralPath $setupZip) { Remove-Item -LiteralPath $setupZip -Force }
-            Compress-Archive -LiteralPath $Setup -DestinationPath $setupZip -CompressionLevel Optimal
-            $zipHash = (Get-FileHash -LiteralPath $setupZip -Algorithm SHA256).Hash
-            Add-Content -LiteralPath $manifestPath -Encoding UTF8 -Value @(
-                "Installer ZIP: dist\installer\$zipName",
-                "Installer ZIP SHA256: $zipHash",
-                "Authenticode: $($sig.Status)"
-            )
-            Write-Host "Installer ZIP: $setupZip"
-            Write-Host "ZIP SHA256:    $zipHash"
-            Write-Host "Authenticode:  $($sig.Status)"
-            if (-not $signedOk) {
-                Write-Warning "Setup exe is not Authenticode-signed. Customer drop will not use _signed.zip name."
-            }
-        }
+    $msiArgs = @()
+    if ($SkipSign) { $msiArgs += "-SkipSign" }
+    & (Join-Path $PSScriptRoot "build_msi.ps1") @msiArgs
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $Msi = Join-Path $Root "dist\installer\NcurityF5Tool-$AppVersion.msi"
+    if (Test-Path -LiteralPath $Msi) {
+        $msiHash = (Get-FileHash -LiteralPath $Msi -Algorithm SHA256).Hash
+        Add-Content -LiteralPath $manifestPath -Encoding UTF8 -Value @(
+            "",
+            "Installer: dist\installer\NcurityF5Tool-$AppVersion.msi",
+            "Installer SHA256: $msiHash",
+            "Installed program: NcurityF5Tool.exe"
+        )
     }
 }
 
 Write-Host ""
-Write-Host "Delivery: give customer the ZIP and/or Setup exe + manifest SHA256 for security whitelist."
+Write-Host "Delivery: give the MSI installer. The program itself is NcurityF5Tool.exe."
 Write-Host "Details: docs\customer_delivery.md"

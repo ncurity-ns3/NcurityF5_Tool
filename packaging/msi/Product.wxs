@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <?ifndef ProductVersion ?>
+    <?define ProductVersion = "1.2.0.0" ?>
+  <?endif?>
+
+  <Package
+    Name="Ncurity F5 Big-IP Managing Tool"
+    Manufacturer="Ncurity"
+    Version="$(var.ProductVersion)"
+    UpgradeCode="A8F3C2E1-9B4D-4F5A-8C3E-010203040506"
+    Scope="perUser"
+    Compressed="yes"
+    Language="1042">
+
+    <SummaryInformation Description="설치 파일은 MSI이고, 실행 파일은 NcurityF5Tool.exe 입니다." />
+    <MajorUpgrade DowngradeErrorMessage="이미 더 새로운 버전이 설치되어 있습니다." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="AppIcon.ico" SourceFile="$(var.AppIcon)" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="UserProgramsFolder" Name="Programs">
+        <Directory Id="NcurityDir" Name="Ncurity">
+          <Directory Id="INSTALLFOLDER" Name="F5 Big-IP Managing Tool" />
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="Ncurity F5 Tool">
+        <Component Id="ApplicationShortcut">
+          <Shortcut
+            Id="StartMenuShortcut"
+            Name="Ncurity F5 Big-IP Managing Tool"
+            Description="Ncurity F5 Big-IP Managing Tool"
+            Target="[INSTALLFOLDER]NcurityF5Tool.exe"
+            WorkingDirectory="INSTALLFOLDER"
+            Icon="AppIcon.ico" />
+          <RemoveFolder Id="CleanUpShortcutFolder" Directory="ApplicationProgramsFolder" On="uninstall" />
+          <RegistryValue
+            Root="HKCU"
+            Key="Software\Ncurity\F5BigIPManagingTool"
+            Name="installed"
+            Type="integer"
+            Value="1"
+            KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.SourceDir)\**" />
+    </ComponentGroup>
+
+    <Feature Id="Main">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="ApplicationShortcut" />
+    </Feature>
+  </Package>
+</Wix>

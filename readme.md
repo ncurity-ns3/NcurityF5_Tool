@@ -18,7 +18,7 @@ offline windows automation platform for f5 field engineers (phase 1 poc).
 |------|------|-----------|
 | 1.0.0 | 정기 점검, OS 업그레이드 전 사전 점검. 당시 빌드 파일 버전은 0.1.0 | `dist\installer\NcurityF5Tool-Setup-1.0.0.exe` |
 | 1.1.0 | APM Macro Save / Load | `dist\installer\NcurityF5Tool-Setup-1.1.0.exe` |
-| 1.2.0 | VPE Viewer, 납품확인서 작성, 메뉴 정리 | GitHub Releases `NcurityF5Tool-Setup-1.2.0.exe` |
+| 1.2.0 | VPE Viewer, 납품확인서 작성, 메뉴 정리 | GitHub Releases `NcurityF5Tool-1.2.0.msi` |
 
 자세한 변경 내용은 [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md)에 있습니다.
 
