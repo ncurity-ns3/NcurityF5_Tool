@@ -66,6 +66,7 @@ class HomeView(QWidget):
         info_layout.addWidget(
             QLabel(
                 "• <b>Device Check</b> — 정기 점검, OS 업그레이드 간 점검, 납품확인서 작성<br>"
+                "• <b>WAF</b> — OWASP Top 10 PoC. 연도를 고르고 대상 IP·Host로 curl 전송<br>"
                 "• <b>VPE Viewer</b> — qkview / UCS / bigip.conf의 APM Access Policy 흐름<br>"
                 "• <b>VPE Macro Copy</b> — 로그인 후 Access Profile의 Macro 조회·복제·저장<br>"
                 "• 저장 Session/장비 목록은 점검 메뉴에서 동일 경로 공유<br>"

