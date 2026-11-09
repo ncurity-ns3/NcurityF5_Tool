@@ -5,7 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PyQt6.QtCore import QEvent, QObject, Qt, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QFont, QKeyEvent, QMouseEvent, QPainter
+from PyQt6.QtGui import (
+    QBrush,
+    QColor,
+    QFont,
+    QKeyEvent,
+    QMouseEvent,
+    QPainter,
+    QPainterPath,
+    QPen,
+)
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QFrame,
@@ -13,8 +22,8 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QSizePolicy,
     QStyle,
-    QStyleOptionViewItem,
     QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -91,6 +100,11 @@ class _DeviceGridItemDelegate(QStyledItemDelegate):
             index.data(Qt.ItemDataRole.BackgroundRole), _IDLE_BG
         )
         painter.fillRect(cell_rect, fill)
+        if index.column() == COL_MODEL:
+            text = index.data(Qt.ItemDataRole.DisplayRole) or ""
+            _paint_model_select(painter, cell_rect, str(text))
+            painter.restore()
+            return
 
         fg = _role_color(
             index.data(Qt.ItemDataRole.ForegroundRole), _IDLE_FG
@@ -115,6 +129,36 @@ class _DeviceGridItemDelegate(QStyledItemDelegate):
 class _DeviceBlock:
     start_row: int
     row_count: int
+
+
+def _paint_model_select(painter: QPainter, cell_rect, text: str) -> None:
+    """White dropdown inside the cell so Model reads as a select box."""
+    box = cell_rect.adjusted(4, 5, -4, -5)
+    if box.width() < 24 or box.height() < 16:
+        return
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(QPen(QColor("#CBD5E1"), 1))
+    painter.setBrush(QColor("#FFFFFF"))
+    painter.drawRoundedRect(box, 6, 6)
+
+    chevron = QPainterPath()
+    tip_x = box.right() - 12
+    tip_y = box.center().y()
+    chevron.moveTo(tip_x - 4, tip_y - 2)
+    chevron.lineTo(tip_x + 4, tip_y - 2)
+    chevron.lineTo(tip_x, tip_y + 3)
+    chevron.closeSubpath()
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor("#0260EA"))
+    painter.drawPath(chevron)
+
+    painter.setPen(QColor("#1A2332"))
+    text_rect = box.adjusted(8, 0, -22, 0)
+    painter.drawText(
+        text_rect,
+        int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+        text,
+    )
 
 
 def _qt_alive(widget: QObject | None) -> bool:
@@ -229,6 +273,7 @@ class MultiDeviceTablePanel(QWidget):
         self._selected_block_idx = -1
         self._active_row = -1
         self._suppress_focus_select = False
+        self._model_popup: ChoicePickerPopup | None = None
 
     def _table_alive(self) -> bool:
         return _qt_alive(self.table)
@@ -394,6 +439,8 @@ class MultiDeviceTablePanel(QWidget):
                 idx, cur, label
             )
         )
+        popup.destroyed.connect(lambda _obj=None: setattr(self, "_model_popup", None))
+        self._model_popup = popup
         popup.show()
 
     def _on_model_picked(self, block_idx: int, current: str, label: str) -> None:
