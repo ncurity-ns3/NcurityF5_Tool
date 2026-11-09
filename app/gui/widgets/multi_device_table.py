@@ -20,7 +20,6 @@ from PyQt6.QtWidgets import (
     QFrame,
     QHeaderView,
     QLineEdit,
-    QSizePolicy,
     QStyle,
     QStyledItemDelegate,
     QStyleOptionViewItem,
@@ -32,7 +31,6 @@ from PyQt6.QtWidgets import (
 
 from app.core.models import PlatformKind
 from app.gui.device_models import MODEL_ISERIES, MODEL_RSERIES, normalize_device_model
-from app.gui.form_controls import configure_table_lineedit
 from app.gui.theme import (
     apply_device_table_style,
     mark_device_table_shell,
@@ -61,8 +59,12 @@ _IDLE_FG = QColor("#1A2332")
 _STACK_ACCENT = QColor("#0260EA")
 _ZEBRA_EVEN = QColor("#FBFDFF")
 _ZEBRA_ODD = QColor("#F3F8FD")
-_TABLE_LINE_H = 26
 _CELL_ALIGN = Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter
+_PASSWORD_ROLE = Qt.ItemDataRole.UserRole + 4
+
+
+def _password_mask(secret: str) -> str:
+    return "••••" if secret else ""
 
 
 def _role_color(value: object, fallback: QColor) -> QColor:
@@ -123,6 +125,48 @@ class _DeviceGridItemDelegate(QStyledItemDelegate):
         text_rect = opt.rect.adjusted(6, 0, -6, 0)
         painter.drawText(text_rect, int(align), str(text))
         painter.restore()
+
+    def createEditor(self, parent, _option, index):  # noqa: N802
+        editor = QLineEdit(parent)
+        editor.setFrame(False)
+        editor.setTextMargins(6, 0, 6, 0)
+        editor.setStyleSheet(
+            "QLineEdit {"
+            "  background-color: #FFFFFF;"
+            "  color: #1A2332;"
+            "  border: none;"
+            "  border-radius: 0;"
+            "  padding: 0;"
+            "  margin: 0;"
+            "  min-height: 0px;"
+            "  max-height: 36px;"
+            "  font-size: 13px;"
+            "}"
+            "QLineEdit:focus { border: none; }"
+        )
+        editor.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        if index.column() == COL_PASS:
+            editor.setEchoMode(QLineEdit.EchoMode.Password)
+        return editor
+
+    def updateEditorGeometry(self, editor, option, _index) -> None:  # noqa: N802
+        editor.setFixedHeight(option.rect.height())
+        editor.setGeometry(option.rect)
+
+    def setEditorData(self, editor, index) -> None:  # noqa: N802
+        if index.column() == COL_PASS:
+            stored = index.data(_PASSWORD_ROLE)
+            editor.setText(stored if isinstance(stored, str) else "")
+            return
+        super().setEditorData(editor, index)
+
+    def setModelData(self, editor, model, index) -> None:  # noqa: N802
+        if index.column() != COL_PASS:
+            super().setModelData(editor, model, index)
+            return
+        secret = editor.text()
+        model.setData(index, _password_mask(secret), Qt.ItemDataRole.DisplayRole)
+        model.setData(index, secret, _PASSWORD_ROLE)
 
 
 @dataclass
@@ -308,11 +352,13 @@ class MultiDeviceTablePanel(QWidget):
         self.rebuild(rows)
 
     def _text(self, row: int, col: int) -> str:
-        widget = self.table.cellWidget(row, col)
-        if isinstance(widget, QLineEdit):
-            return widget.text().strip()
         item = self.table.item(row, col)
-        return item.text().strip() if item else ""
+        if item is None:
+            return ""
+        if col == COL_PASS:
+            stored = item.data(_PASSWORD_ROLE)
+            return stored.strip() if isinstance(stored, str) else ""
+        return item.text().strip()
 
     def _tag_row_widget(self, row: int, widget: QWidget) -> None:
         widget.setProperty("_table_row", row)
@@ -359,37 +405,11 @@ class MultiDeviceTablePanel(QWidget):
         polish_widget_scrollbars(self.table)
 
     def _set_password(self, row: int, col: int, password: str) -> None:
-        stub = QTableWidgetItem()
-        stub.setFlags(Qt.ItemFlag.NoItemFlags)
-        self.table.setItem(row, col, stub)
-        edit = QLineEdit(password)
-        edit.setEchoMode(QLineEdit.EchoMode.Password)
-        configure_table_lineedit(edit)
-        self._apply_password_field_style(edit, in_selected_block=False)
-        self.table.setCellWidget(row, col, edit)
-        self._tag_row_widget(row, edit)
-
-    @staticmethod
-    def _apply_password_field_style(edit: QLineEdit, *, in_selected_block: bool) -> None:
-        """Password box stays white + black text; blue border when device row is selected."""
-        edit.setProperty("formControl", "tableLine")
-        edit.setFixedHeight(_TABLE_LINE_H)
-        edit.setMinimumHeight(_TABLE_LINE_H)
-        edit.setMaximumHeight(_TABLE_LINE_H)
-        edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        border = "#0260EA" if in_selected_block else "#E2E8F0"
-        edit.setStyleSheet(
-            "QLineEdit {"
-            "  background-color: #FFFFFF;"
-            "  color: #1A2332;"
-            f"  border: 1px solid {border};"
-            "  border-radius: 6px;"
-            "  padding: 4px 8px;"
-            "  font-size: 13px;"
-            f"  min-height: {_TABLE_LINE_H}px;"
-            f"  max-height: {_TABLE_LINE_H}px;"
-            "}"
-        )
+        item = QTableWidgetItem(_password_mask(password))
+        item.setData(_PASSWORD_ROLE, password)
+        item.setTextAlignment(_CELL_ALIGN)
+        item.setForeground(QBrush(_IDLE_FG))
+        self.table.setItem(row, col, item)
 
     def _set_text(self, row: int, col: int, text: str, *, editable: bool = True) -> None:
         item = QTableWidgetItem(text)
@@ -588,7 +608,6 @@ class MultiDeviceTablePanel(QWidget):
                                 item.setForeground(QBrush(_SEL_FG))
                         else:
                             item.setForeground(QBrush(_STACK_ACCENT))
-            self._style_block_widgets(block, selected)
         self.table.viewport().update()
 
     def _highlight_block(self, block_idx: int) -> None:
@@ -596,19 +615,6 @@ class MultiDeviceTablePanel(QWidget):
             return
         self._selected_block_idx = block_idx
         self._apply_block_highlight(block_idx)
-
-    def _style_block_widgets(self, block: _DeviceBlock, selected: bool) -> None:
-        pass_col = self._auth_cols()[1]
-        if pass_col < 0:
-            return
-        for r in range(block.start_row, block.start_row + block.row_count):
-            bg, _fg = self._row_sel_colors(block, r, selected=selected)
-            stub = self.table.item(r, pass_col)
-            if stub is not None:
-                stub.setBackground(QBrush(bg))
-            widget = self.table.cellWidget(r, pass_col)
-            if isinstance(widget, QLineEdit):
-                self._apply_password_field_style(widget, in_selected_block=selected)
 
     def _set_stack_row(
         self,
