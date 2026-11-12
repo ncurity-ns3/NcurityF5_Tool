@@ -30,6 +30,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -441,6 +442,18 @@ class VpeViewerView(QWidget):
         self._status.setWordWrap(True)
         self._status.setProperty("role", "muted")
         root.addWidget(self._status)
+        self._progress = QProgressBar()
+        self._progress.setRange(0, 100)
+        self._progress.setValue(0)
+        self._progress.setTextVisible(True)
+        self._progress.setFormat("분석 중… %p%")
+        self._progress.setFixedHeight(22)
+        self._progress.hide()
+        root.addWidget(self._progress)
+        self._busy = QTimer(self)
+        self._busy.setInterval(200)
+        self._busy.timeout.connect(self._tick_busy)
+        self._busy_value = 0
 
         self._profiles = QListWidget()
         self._profiles.setObjectName("vpeProfileList")
@@ -576,20 +589,41 @@ class VpeViewerView(QWidget):
         name = Path(path).name
         self._upload.setEnabled(False)
         self._source.setText(name)
-        self._status.setText(f"{name} 분석 중…")
+        self._set_busy(True, f"{name} 분석 중…")
         self._worker = _LoadWorker(path, name)
         self._worker.loaded.connect(self._on_loaded)
         self._worker.failed.connect(self._on_failed)
-        self._worker.finished.connect(lambda: self._upload.setEnabled(True))
+        self._worker.finished.connect(self._load_finished)
         self._worker.start()
 
+    def _set_busy(self, busy: bool, text: str) -> None:
+        self._status.setText(text)
+        self._progress.setVisible(busy)
+        if busy:
+            self._busy_value = 8
+            self._progress.setValue(8)
+            self._busy.start()
+            return
+        self._busy.stop()
+
+    def _tick_busy(self) -> None:
+        self._busy_value = min(92, self._busy_value + 4)
+        self._progress.setValue(self._busy_value)
+
+    def _load_finished(self) -> None:
+        self._set_busy(False, self._status.text())
+        self._upload.setEnabled(True)
+
     def _on_failed(self, message: str) -> None:
+        self._set_busy(False, message)
         self._status.setText(message)
 
     def _on_loaded(self, model: object) -> None:
         if not isinstance(model, dict):
+            self._set_busy(False, "분석 결과를 읽지 못했습니다.")
             self._status.setText("분석 결과를 읽지 못했습니다.")
             return
+        self._progress.setValue(100)
         self._model = model
         summary = model.get("summary") or {}
         profiles = summary.get("profiles")

@@ -7,7 +7,7 @@
 1.1.0  APM Macro
 1.2.0  VPE Viewer, 납품확인서 작성, 메뉴 구성 정리
 1.3.0  WAF, OWASP Top 10 PoC. 연도는 2017, 2021, 2025. 목록은 2021
-1.3.1  OWASP 취약점 공격, Custom 공격 구문. Multiple Model 선택. 장비별 계정은 셀 안에서 입력.
+1.3.1  OWASP 취약점 공격, Custom 공격 구문. Multiple Model 선택. 큰 UCS도 VPE에서 분석.
 
 버전 번호는 1.2.3 입니다.
 1  UI 전체가 바뀌는 수준의 큰 변경

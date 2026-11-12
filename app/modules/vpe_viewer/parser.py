@@ -107,7 +107,7 @@ def _parse_braces(reader: _Reader) -> Any:
         while True:
             tok = reader.peek()
             if tok is None:
-                raise ParseError("unclosed {")
+                break
             if tok[0] == "}":
                 reader.get()
                 break
@@ -130,7 +130,7 @@ def _parse_braces(reader: _Reader) -> Any:
     while True:
         tok = reader.peek()
         if tok is None:
-            raise ParseError("unclosed {")
+            break
         if tok[0] == "}":
             reader.get()
             break
@@ -228,8 +228,20 @@ def _skip_brace_block(text: str, i: int) -> int:
         if (i < n):
             continue
     return n
-def _is_wanted_top_level(text: str, i: int) -> bool:
-    return (text.startswith('apm policy ', i) or (text.startswith('apm profile access ', i) or (text.startswith('apm aaa ', i) or (text.startswith('apm sso ', i) or (text.startswith('apm resource ', i) or text.startswith('ltm virtual ', i))))))
+def _body_is_needed(header: str) -> bool:
+    """Only objects the viewer draws. Customization groups hold HTML and CSS."""
+    return header.startswith(
+        (
+            "apm policy access-policy ",
+            "apm policy policy-item ",
+            "apm policy agent ",
+            "apm profile access ",
+            "apm aaa ",
+            "apm sso ",
+            "apm resource ",
+            "ltm virtual ",
+        )
+    )
 def _iter_top_level_objects(text: str):
     n = len(text)
     i = 0
@@ -248,10 +260,11 @@ def _iter_top_level_objects(text: str):
             i = newline + 1 if newline != -1 else n
             continue
         end = _skip_brace_block(text, brace)
-        if text.startswith("ltm rule ", i):
-            yield (text[i:brace].strip(), None, brace, end)
-        elif _is_wanted_top_level(text, i):
-            yield (text[i:brace].strip(), text[brace:end], brace, end)
+        header = text[i:brace].strip()
+        if header.startswith("ltm rule "):
+            yield (header, None, brace, end)
+        elif _body_is_needed(header):
+            yield (header, text[brace:end], brace, end)
         i = end
 def _parse_body_text(body: str) -> dict[str, Any]:
     reader = _Reader(_tokenize(body))
@@ -271,7 +284,10 @@ def parse_tmsh_apm_objects(text: str) -> dict[str, list[dict[str, Any]]]:
             continue
         if body is None:
             continue
-        parsed = _parse_body_text(body)
+        try:
+            parsed = _parse_body_text(body)
+        except ParseError:
+            continue
         if header.startswith('apm policy access-policy ') and (len(parts) >= 4):
             parsed['name'] = parts[3]
             access_policies.append(parsed)
