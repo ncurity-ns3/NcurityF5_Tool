@@ -190,11 +190,9 @@ def _skip_brace_block(text: str, i: int) -> int:
             if _starts_top_level_object(text, i):
                 return i
         c = text[i]
-        if (c == '"'):
-            if (i > 0):
-                if not (text[(i - 1)] == '\\'):
-                    i = _skip_quoted(text, i)
-                    continue
+        # TMSH writes \" inside values. That quote does not open a string,
+        # and treating it as one swallows every Access Policy after it.
+        if c == '"' and not (i > 0 and text[i - 1] == '\\'):
             i = _skip_quoted(text, i)
             continue
         if (c == '#') and _is_line_comment(text, i):
@@ -781,18 +779,18 @@ def materialize_policy_graph(model: dict[str, Any], name: str) -> dict[str, Any]
     target.update(built)
     return target
 def _drop_unused_terminals(nodes: list[dict[str, Any]], edges: list[dict[str, Any]], start_item: str | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Hide terminal boxes that no branch in the policy actually reaches."""
     incoming = {edge['to'] for edge in edges}
-    _collected = set()
-    for node in nodes:
-        if not (node['id'] == start_item):
-            if not (node.get('kind') in frozenset({'entry', 'start'})):
-                if not (node.get('kind') != 'terminal'):
-                    if (node['id'] in incoming):
-                        pass
-        _collected.add(node['id'])
-    keep_ids = _collected
-    nodes = [node for node in nodes if (node['id'] in keep_ids)]
-    edges = [edge for edge in edges if (edge['from'] in keep_ids) and (edge['to'] in keep_ids)]
+    keep_ids = {
+        node['id']
+        for node in nodes
+        if node['id'] == start_item
+        or node.get('kind') in {'start', 'entry'}
+        or node.get('kind') != 'terminal'
+        or node['id'] in incoming
+    }
+    nodes = [node for node in nodes if node['id'] in keep_ids]
+    edges = [edge for edge in edges if edge['from'] in keep_ids and edge['to'] in keep_ids]
     return (nodes, edges)
 def parse_apm_config(text: str) -> dict[str, Any]:
     raw = parse_tmsh_apm_objects(text)
