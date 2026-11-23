@@ -9,6 +9,7 @@ from app.modules.vpe_macro.apm_macro import (
 )
 from app.modules.vpe_macro.macro_boxes import (
     parse_tmsh_object,
+    rename_macro_name,
     saved_macro_cleanup_command,
     saved_macro_transaction,
     strip_object_refs,
@@ -152,6 +153,88 @@ _AGENTS = "\n".join(
         _QUERY_AGENT,
     ]
 )
+
+
+def test_saved_transaction_does_not_recreate_hyphenated_source_boxes() -> None:
+    source = "AP_HD_Capital_CSH-auth_1factor_1_1"
+    command = saved_macro_transaction(
+        partition="Common",
+        actual="Auth_1Factor",
+        caption="Auth_1Factor",
+        target_policy_path="/Common/AP_00_OS_Upgrade",
+        source_name=source,
+        items=[
+            {
+                "name": f"{source}-ent",
+                "itemType": "entry",
+                "caption": "Start",
+                "rules": [{"caption": "fallback", "nextItem": f"{source}_out"}],
+            },
+            {
+                "name": f"{source}_out",
+                "itemType": "terminal-out",
+                "caption": "Successful",
+            },
+        ],
+        agents=[],
+        start_item=f"{source}-ent",
+        default_ending=f"{source}_out",
+    )
+    assert f"/{source}" not in command
+    assert "/Common/Auth_1Factor-ent" in command
+    assert "/Common/Auth_1Factor_out" in command
+
+
+def test_action_out_branch_is_written_as_fallback() -> None:
+    command = saved_macro_transaction(
+        partition="Common",
+        actual="Auth_1Factor",
+        caption="Auth_1Factor",
+        target_policy_path="/Common/AP_00_OS_Upgrade",
+        source_name="AP_HD_Capital_CSH-auth_1factor_1_1",
+        items=[
+            {
+                "name": "AP_HD_Capital_CSH-auth_1factor_1_1_mac_onefactor_deny_logging",
+                "itemType": "action",
+                "caption": "OneFactor_Deny_Logging",
+                "rules": [
+                    {
+                        "caption": "Out",
+                        "expression": "",
+                        "nextItem": "/Common/AP_HD_Capital_CSH-auth_1factor_ter_onefactor_deny_1_1",
+                    }
+                ],
+            },
+            {
+                "name": "AP_HD_Capital_CSH-auth_1factor_ter_onefactor_deny_1_1",
+                "itemType": "terminal-out",
+                "caption": "OneFactor_Deny",
+                "rules": [],
+            },
+        ],
+        agents=[],
+        start_item="AP_HD_Capital_CSH-auth_1factor_1_1_mac_onefactor_deny_logging",
+        default_ending="AP_HD_Capital_CSH-auth_1factor_ter_onefactor_deny_1_1",
+    )
+    deny = rename_macro_name(
+        "AP_HD_Capital_CSH-auth_1factor_ter_onefactor_deny_1_1",
+        "AP_HD_Capital_CSH-auth_1factor_1_1",
+        "Auth_1Factor",
+    )
+    assert "caption Out" not in command
+    assert f"caption fallback next-item /Common/{deny}" in command
+
+
+def test_hyphenated_source_items_get_the_new_macro_name() -> None:
+    source = "AP_HD_Capital_CSH-auth_1factor_1_1"
+    actual = "Auth_1Factor"
+    assert rename_macro_name(source, source, actual) == actual
+    assert (
+        rename_macro_name(f"{source}_act_logon_page", source, actual)
+        == "Auth_1Factor_act_logon_page"
+    )
+    assert rename_macro_name(f"{source}-ent", source, actual) == "Auth_1Factor-ent"
+    assert rename_macro_name("logon_page_ag", source, actual) == "Auth_1Factor_logon_page_ag"
 
 
 def test_parse_keeps_expression_and_strips_server() -> None:

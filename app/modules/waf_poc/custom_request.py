@@ -185,7 +185,7 @@ def _argv(
         "-sS",
         "-i",
         "-w",
-        "\n[http %{http_code}]\n",
+        "\n[http %{http_code}]\n[url %{url_effective}]\n",
         "--resolve",
         f"{target.host}:{target.port}:{target.resolve_address}",
         "-X",

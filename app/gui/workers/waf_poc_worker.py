@@ -12,10 +12,11 @@ class WafPocWorker(QThread):
     run_done = pyqtSignal(object)
     run_failed = pyqtSignal(str)
 
-    def __init__(self, cases: list[PocCase], target: Target) -> None:
+    def __init__(self, cases: list[PocCase], target: Target, *, block_phrase: str = "") -> None:
         super().__init__()
         self.cases = cases
         self.target = target
+        self.block_phrase = block_phrase
         self.runner = CurlRunner()
 
     def stop_now(self) -> None:
@@ -29,6 +30,7 @@ class WafPocWorker(QThread):
                 self.target,
                 on_text=self.log_line.emit,
                 runner=self.runner,
+                block_phrase=self.block_phrase,
             )
         except (OSError, ValueError) as exc:
             self.run_failed.emit(str(exc))

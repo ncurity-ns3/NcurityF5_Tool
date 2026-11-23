@@ -27,6 +27,27 @@ def test_blocked_status_and_block_page() -> None:
     assert classify_response("", timed_out=True, return_code=28) == ("failed", None)
 
 
+def test_block_phrase_matches_url_header_or_body() -> None:
+    page = "HTTP/1.1 200 OK\n\nok\n[http 200]\n[url http://lab/app?x=1]"
+    assert classify_response(page, timed_out=False, return_code=0, block_phrase="200 OK") == (
+        "blocked",
+        200,
+    )
+    assert classify_response(page, timed_out=False, return_code=0, block_phrase="Blocked") == (
+        "passed",
+        200,
+    )
+    header = "HTTP/1.1 200 OK\nX-Result: Blocked\n\nhello\n[http 200]"
+    assert classify_response(header, timed_out=False, return_code=0, block_phrase="blocked")[0] == (
+        "blocked"
+    )
+    url = "HTTP/1.1 302\n\n[http 302]\n[url http://lab/block?msg=Blocked]"
+    found = classify_response(url, timed_out=False, return_code=0, block_phrase="Blocked")
+    assert found[0] == "blocked"
+    blank = classify_response(page, timed_out=False, return_code=0, block_phrase="   ")
+    assert blank[0] == "passed"
+
+
 def test_summary_counts_each_category() -> None:
     results = [
         RequestResult("A1 Broken Access Control", "a", "curl", 403, "blocked", ""),

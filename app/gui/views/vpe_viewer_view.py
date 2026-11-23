@@ -4,17 +4,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QRectF, QThread, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QPoint, QRectF, QThread, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QBrush,
     QColor,
+    QCursor,
     QFont,
     QFontMetrics,
     QKeySequence,
     QPainter,
     QPainterPath,
+    QPalette,
     QPen,
     QShortcut,
+    QTextBlockFormat,
+    QTextCursor,
+    QTextOption,
 )
 from PyQt6.QtWidgets import (
     QApplication,
@@ -33,6 +38,7 @@ from PyQt6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSplitter,
     QTextEdit,
     QVBoxLayout,
@@ -40,7 +46,16 @@ from PyQt6.QtWidgets import (
 )
 
 from app.gui.theme import mark_page_subtitle, mark_page_title, mark_primary_button, mark_secondary_button
+from app.gui.widgets.panel_toggle import PanelToggle
+from app.modules.vpe_viewer.detail_text import (
+    detail_document_html,
+    field_label,
+    object_section_html,
+    section_card,
+)
 from app.modules.vpe_viewer.layout import layout_graph
+
+_SIDE_CLOSED = 36
 
 _NODE_COLORS = {
     1: "#67b246",
@@ -54,6 +69,117 @@ _NODE_COLORS = {
     16: "#8a6bb0",
 }
 _FILE_FILTER = "APM 설정 (*.qkview *.ucs *.conf *.tar *.gz *.tgz *.zip);;모든 파일 (*.*)"
+_DETAIL_FONT = QFont("Malgun Gothic", 11)
+_WHEEL_NOTCH_PX = 72
+
+
+def _wheel_scroll_delta(event) -> tuple[int, int]:
+    """Return scrollbar deltas. Wheel up and drag-right move the view, not the content."""
+    pixel = event.pixelDelta()
+    if pixel.x() or pixel.y():
+        dx, dy = pixel.x(), pixel.y()
+    else:
+        angle = event.angleDelta()
+        dx = int(round(angle.x() / 120 * _WHEEL_NOTCH_PX))
+        dy = int(round(angle.y() / 120 * _WHEEL_NOTCH_PX))
+    if event.modifiers() & Qt.KeyboardModifier.ShiftModifier and dx == 0:
+        dx, dy = dy, 0
+    return -dx, -dy
+
+
+class _PanSurface:
+    """Wheel scrolling for a diagram view. Middle-click autoscroll is separate."""
+
+    def __init__(self, on_scroll) -> None:
+        self._on_scroll = on_scroll
+
+    def pan_wheel(self, event) -> None:
+        dx, dy = _wheel_scroll_delta(event)
+        if self._on_scroll is not None and (dx or dy):
+            self._on_scroll(dx, dy)
+        event.accept()
+
+
+class _ScrollMark(QWidget):
+    """Fixed marker shown while middle-click autoscroll is active."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(64, 64)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.hide()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        del event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor("#1A2332"), 2))
+        painter.setBrush(QColor("#FFFFFF"))
+        painter.drawEllipse(self.rect().adjusted(2, 2, -2, -2))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#1A2332"))
+        arrows = (
+            ((32, 8), (25, 17), (39, 17)),
+            ((32, 56), (25, 47), (39, 47)),
+            ((8, 32), (17, 25), (17, 39)),
+            ((56, 32), (47, 25), (47, 39)),
+        )
+        for first, second, third in arrows:
+            path = QPainterPath()
+            path.moveTo(*first)
+            path.lineTo(*second)
+            path.lineTo(*third)
+            path.closeSubpath()
+            painter.drawPath(path)
+        painter.setPen(QPen(QColor("#1A2332"), 1.7))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(QRectF(28, 28, 8, 8))
+
+
+def _auto_speed(delta: int) -> int:
+    """Scroll step follows how far the pointer sits from the mark."""
+    distance = abs(delta) - 8
+    if distance <= 0:
+        return 0
+    step = min(96, max(6, int(distance * 0.55)))
+    return step if delta > 0 else -step
+
+
+class _ViewerInput(QObject):
+    """File drops and middle-click autoscroll for the diagram surface."""
+
+    def __init__(self, owner: VpeViewerView) -> None:
+        super().__init__(owner)
+        self._owner = owner
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        del watched
+        kind = event.type()
+        if kind in {QEvent.Type.DragEnter, QEvent.Type.DragMove}:
+            mime = event.mimeData()
+            if mime is not None and mime.hasUrls():
+                event.acceptProposedAction()
+                return True
+            return False
+        if kind == QEvent.Type.Drop:
+            mime = event.mimeData()
+            if mime is None or not mime.hasUrls():
+                return False
+            urls = mime.urls()
+            path = urls[0].toLocalFile() if urls else ""
+            if not path:
+                return False
+            self._owner._load_path(path)
+            event.acceptProposedAction()
+            return True
+        if kind == QEvent.Type.MouseButtonPress:
+            button = event.button()
+            if button == Qt.MouseButton.MiddleButton:
+                self._owner._toggle_autoscroll(event.globalPosition().toPoint())
+                return True
+            if button == Qt.MouseButton.LeftButton and self._owner._auto_timer.isActive():
+                self._owner._stop_autoscroll()
+        return False
 
 
 class _LoadWorker(QThread):
@@ -148,11 +274,13 @@ class _NodeItem(QGraphicsItem):
 
 
 class _GraphView(QGraphicsView):
-    def __init__(self, scene: QGraphicsScene, on_file, on_zoom=None) -> None:
+    def __init__(self, scene: QGraphicsScene, on_file, on_zoom=None, on_scroll=None) -> None:
         super().__init__(scene)
         self._on_file = on_file
         self._on_zoom = on_zoom
+        self._pan = _PanSurface(on_scroll)
         self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802
         if event.mimeData().hasUrls():
@@ -168,13 +296,19 @@ class _GraphView(QGraphicsView):
             return
         super().dropEvent(event)
 
+    def dragMoveEvent(self, event) -> None:  # noqa: N802
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
     def wheelEvent(self, event) -> None:  # noqa: N802
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier and self._on_zoom is not None:
             factor = 1.12 if event.angleDelta().y() > 0 else 1 / 1.12
             self._on_zoom(factor)
             event.accept()
             return
-        event.ignore()
+        self._pan.pan_wheel(event)
 
 
 def _paint_policy(scene: QGraphicsScene, policy: dict, on_node, *, titled: bool) -> dict:
@@ -238,8 +372,26 @@ def _place_graph_view(view: QGraphicsView, laid: dict, scale: float) -> None:
 
 
 class _FlatGraphView(QGraphicsView):
+    def __init__(self, scene: QGraphicsScene, on_scroll=None) -> None:
+        super().__init__(scene)
+        self._pan = _PanSurface(on_scroll)
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
     def wheelEvent(self, event) -> None:  # noqa: N802
-        event.ignore()
+        self._pan.pan_wheel(event)
 
 
 class _PolicyBanner(QWidget):
@@ -330,7 +482,7 @@ class _FoldHeader(QWidget):
 
 
 class _MacroSection(QWidget):
-    def __init__(self, policy: dict, on_node, on_toggle) -> None:
+    def __init__(self, policy: dict, on_node, on_toggle, on_scroll=None, input_filter=None) -> None:
         super().__init__()
         self.setObjectName("vpeMacroCard")
         self.policy = policy
@@ -345,8 +497,10 @@ class _MacroSection(QWidget):
         self.bar = _FoldHeader(self.caption, lambda: on_toggle(self.name))
         layout.addWidget(self.bar)
         self.scene = QGraphicsScene(self)
-        self.view = _FlatGraphView(self.scene)
+        self.view = _FlatGraphView(self.scene, on_scroll)
         self.view.setObjectName("vpeGraph")
+        if input_filter is not None:
+            _watch_drops(self.view, input_filter)
         self.view.setRenderHints(
             QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing
         )
@@ -374,6 +528,16 @@ class _MacroSection(QWidget):
         self.view.show()
 
 
+def _watch_drops(widget: QWidget, input_filter: QObject) -> None:
+    widget.setAcceptDrops(True)
+    widget.installEventFilter(input_filter)
+    viewport = getattr(widget, "viewport", None)
+    if callable(viewport):
+        surface = widget.viewport()
+        surface.setAcceptDrops(True)
+        surface.installEventFilter(input_filter)
+
+
 class VpeViewerView(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -389,6 +553,12 @@ class VpeViewerView(QWidget):
         self._draw_gen = 0
         self._copy_text = ""
         self._find_at = 0
+        self._auto_origin = QPoint()
+        self._auto_point: QPoint | None = None
+        self._auto_timer = QTimer(self)
+        self._auto_timer.setInterval(16)
+        self._auto_timer.timeout.connect(self._auto_tick)
+        self._input = _ViewerInput(self)
         self._scene = QGraphicsScene(self)
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -437,6 +607,8 @@ class VpeViewerView(QWidget):
         self._find_shortcut.activated.connect(self._open_find)
         self._find_esc = QShortcut(QKeySequence("Esc"), self._find)
         self._find_esc.activated.connect(self._find.hide)
+        self._auto_esc = QShortcut(QKeySequence("Esc"), self)
+        self._auto_esc.activated.connect(self._stop_autoscroll)
 
         self._status = QLabel("qkview를 올리면 Access Policy 흐름도가 생성됩니다.")
         self._status.setWordWrap(True)
@@ -457,8 +629,31 @@ class VpeViewerView(QWidget):
 
         self._profiles = QListWidget()
         self._profiles.setObjectName("vpeProfileList")
+        self._profiles.setFrameShape(QFrame.Shape.NoFrame)
+        self._profiles.setMinimumWidth(0)
         self._profiles.currentItemChanged.connect(self._on_profile)
-        self._view = _GraphView(self._scene, self._load_path, self._zoom_by)
+        profile_wrap = QFrame()
+        self._profile_wrap = profile_wrap
+        profile_wrap.setObjectName("vpeSideCard")
+        profile_layout = QVBoxLayout(profile_wrap)
+        profile_layout.setContentsMargins(8, 6, 8, 8)
+        profile_layout.setSpacing(4)
+        profile_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        profile_head = QHBoxLayout()
+        profile_head.setContentsMargins(0, 0, 0, 0)
+        profile_head.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self._profile_toggle = PanelToggle()
+        self._profile_toggle.setObjectName("vpePanelToggle")
+        self._profile_toggle.setToolTip("프로필 목록 접기")
+        self._profile_toggle.clicked.connect(self._toggle_profiles)
+        profile_head.addWidget(self._profile_toggle)
+        self._profile_caption = QLabel("프로필")
+        self._profile_caption.setObjectName("vpeDetailTitle")
+        profile_head.addWidget(self._profile_caption)
+        profile_head.addStretch(1)
+        profile_layout.addLayout(profile_head)
+        profile_layout.addWidget(self._profiles, stretch=1)
+        self._view = _GraphView(self._scene, self._load_path, self._zoom_by, self._scroll_by)
         self._view.setObjectName("vpeGraph")
         self._view.setRenderHints(
             QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing
@@ -469,7 +664,19 @@ class VpeViewerView(QWidget):
         self._view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._view.setBackgroundBrush(QBrush(QColor("#F7F8FA")))
         self._detail = QTextEdit()
+        self._detail.setObjectName("vpeDetail")
+        self._detail.setFrameShape(QFrame.Shape.NoFrame)
+        self._detail.setMinimumWidth(0)
         self._detail.setReadOnly(True)
+        self._detail.setFont(_DETAIL_FONT)
+        self._detail.document().setDefaultFont(_DETAIL_FONT)
+        self._detail.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        self._detail.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        palette = self._detail.palette()
+        palette.setColor(QPalette.ColorRole.Text, QColor("#1A2332"))
+        palette.setColor(QPalette.ColorRole.Base, QColor("#FFFFFF"))
+        palette.setColor(QPalette.ColorRole.PlaceholderText, QColor("#5C6B7A"))
+        self._detail.setPalette(palette)
         self._detail.setPlaceholderText("항목을 누르면 설정이 여기에 나옵니다.")
         self._hint = QLabel("qkview 파일을 여기에 놓으세요\n또는 위 버튼으로 .qkview / .ucs / bigip.conf 선택")
         self._hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -506,30 +713,71 @@ class VpeViewerView(QWidget):
         self._scroll.setWidget(self._page)
         self._scroll.hide()
         canvas_layout.addWidget(self._scroll)
-        detail_box = QWidget()
+        self._mark = _ScrollMark(self._scroll.viewport())
+        detail_box = QFrame()
+        self._detail_box = detail_box
+        detail_box.setObjectName("vpeDetailCard")
         detail_layout = QVBoxLayout(detail_box)
-        detail_layout.setContentsMargins(0, 0, 0, 0)
-        detail_layout.setSpacing(6)
+        detail_layout.setContentsMargins(8, 6, 8, 8)
+        detail_layout.setSpacing(4)
+        detail_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        detail_head = QHBoxLayout()
+        detail_head.setContentsMargins(0, 0, 0, 0)
+        detail_head.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        self._detail_title = QLabel("Description")
+        self._detail_title.setObjectName("vpeDetailTitle")
+        detail_head.addWidget(self._detail_title)
+        detail_head.addStretch(1)
         self._copy = QPushButton("iRule 소스 복사")
         mark_secondary_button(self._copy)
         self._copy.clicked.connect(self._copy_irule)
         self._copy.hide()
-        detail_layout.addWidget(self._copy)
+        detail_head.addWidget(self._copy)
+        self._detail_toggle = PanelToggle()
+        self._detail_toggle.setObjectName("vpePanelToggle")
+        self._detail_toggle.setToolTip("Description 접기")
+        self._detail_toggle.clicked.connect(self._toggle_detail)
+        detail_head.addWidget(self._detail_toggle)
+        detail_layout.addLayout(detail_head)
+        detail_layout.addWidget(self._detail, stretch=1)
 
-        splitter = QSplitter()
-        splitter.addWidget(self._profiles)
-        splitter.addWidget(self._canvas)
-        detail_layout.addWidget(self._detail)
-        splitter.addWidget(detail_box)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([240, 700, 280])
-        root.addWidget(splitter, stretch=1)
+        self._splitter = QSplitter()
+        self._splitter.addWidget(profile_wrap)
+        self._splitter.addWidget(self._canvas)
+        self._splitter.addWidget(detail_box)
+        self._splitter.setStretchFactor(1, 1)
+        self._splitter.setCollapsible(0, True)
+        self._splitter.setCollapsible(2, True)
+        self._splitter.setSizes([240, 700, 320])
+        root.addWidget(self._splitter, stretch=1)
+        for widget in (
+            self,
+            self._canvas,
+            self._scroll,
+            self._page,
+            self._policy_card,
+            self._view,
+        ):
+            _watch_drops(widget, self._input)
         self.setStyleSheet(
             """
-            QListWidget#vpeProfileList, QTextEdit, QFrame#vpeCanvas {
+            QFrame#vpeCanvas {
                 background: #FFFFFF;
                 border: 1px solid #E2E8F0;
                 border-radius: 10px;
+            }
+            QFrame#vpeSideCard, QFrame#vpeDetailCard {
+                background: #FFFFFF;
+                border: 1px solid #E2E8F0;
+                border-radius: 10px;
+            }
+            QFrame#vpeSideCard[collapsed="true"], QFrame#vpeDetailCard[collapsed="true"] {
+                background: transparent;
+                border: none;
+            }
+            QListWidget#vpeProfileList {
+                background: transparent;
+                border: none;
             }
             QListWidget#vpeProfileList::item { padding: 6px 8px; }
             QListWidget#vpeProfileList::item:selected { background: #EDF5FF; color: #0260EA; }
@@ -552,10 +800,30 @@ class VpeViewerView(QWidget):
                 border: none;
                 padding: 2px 4px;
             }
+            QLabel#vpeDetailTitle {
+                color: #1A2332;
+                background: transparent;
+                border: none;
+                font-family: "Malgun Gothic", "Segoe UI", sans-serif;
+                font-size: 15px;
+                font-weight: 700;
+                padding: 0 2px 2px 2px;
+            }
+            QTextEdit#vpeDetail {
+                background: #FFFFFF;
+                color: #1A2332;
+                border: none;
+                padding: 4px 6px 8px 6px;
+                font-family: "Malgun Gothic", "Segoe UI", sans-serif;
+                font-size: 14px;
+                selection-background-color: #D6E6FF;
+                selection-color: #1A2332;
+            }
             """
         )
 
     def shutdown(self) -> None:
+        self._stop_autoscroll()
         worker = self._worker
         self._worker = None
         if worker is not None and worker.isRunning():
@@ -566,6 +834,12 @@ class VpeViewerView(QWidget):
             event.acceptProposedAction()
             return
         super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
 
     def dropEvent(self, event) -> None:  # noqa: N802
         urls = event.mimeData().urls()
@@ -739,7 +1013,13 @@ class VpeViewerView(QWidget):
             self._open_macros.add(focus_name)
         self._macro_heading.setVisible(bool(macros))
         for macro in macros:
-            section = _MacroSection(macro, self._on_node, self._toggle_macro)
+            section = _MacroSection(
+                macro,
+                self._on_node,
+                self._toggle_macro,
+                self._scroll_by,
+                self._input,
+            )
             self._sections.append(section)
             self._page_layout.insertWidget(self._page_layout.count() - 1, section)
         self._draw_gen += 1
@@ -791,6 +1071,95 @@ class VpeViewerView(QWidget):
             self._scroll_to_macro(focus)
             return
         self._scroll.verticalScrollBar().setValue(0)
+
+    def _toggle_profiles(self) -> None:
+        self._set_side_open(self._profiles, self._profile_caption, self._profile_toggle, 0, 240)
+
+    def _toggle_detail(self) -> None:
+        self._set_side_open(self._detail, self._detail_title, self._detail_toggle, 2, 320)
+        self._copy.setVisible((not self._detail.isHidden()) and bool(self._copy_text))
+
+    def _set_side_open(
+        self,
+        body: QWidget,
+        caption: QLabel,
+        toggle: PanelToggle,
+        index: int,
+        open_width: int,
+    ) -> None:
+        opened = not body.isVisible()
+        body.setVisible(opened)
+        caption.setVisible(opened)
+        toggle.set_open(opened)
+        wrap = self._profile_wrap if index == 0 else self._detail_box
+        wrap.setProperty("collapsed", not opened)
+        if wrap.layout() is not None:
+            if opened:
+                wrap.layout().setContentsMargins(8, 6, 8, 8)
+            else:
+                wrap.layout().setContentsMargins(4, 6, 4, 4)
+        wrap.setMinimumWidth(0 if opened else _SIDE_CLOSED)
+        wrap.setMaximumWidth(16777215 if opened else _SIDE_CLOSED)
+        wrap.setSizePolicy(
+            QSizePolicy.Policy.Preferred if opened else QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Expanding,
+        )
+        wrap.style().unpolish(wrap)
+        wrap.style().polish(wrap)
+        if index == 0:
+            toggle.setToolTip("프로필 목록 접기" if opened else "프로필 목록 열기")
+        else:
+            toggle.setToolTip("Description 접기" if opened else "Description 열기")
+        sizes = self._splitter.sizes()
+        if len(sizes) == 3:
+            sizes[index] = open_width if opened else _SIDE_CLOSED
+            self._splitter.setSizes(sizes)
+
+    def _toggle_autoscroll(self, global_pos: QPoint) -> None:
+        if self._auto_timer.isActive():
+            self._stop_autoscroll()
+            return
+        if not self._scroll.isVisible():
+            return
+        viewport = self._scroll.viewport()
+        if viewport is None:
+            return
+        origin = viewport.mapFromGlobal(global_pos)
+        self._auto_origin = origin
+        self._mark.move(origin.x() - self._mark.width() // 2, origin.y() - self._mark.height() // 2)
+        self._mark.show()
+        self._mark.raise_()
+        self._auto_timer.start()
+
+    def _stop_autoscroll(self) -> None:
+        self._auto_timer.stop()
+        self._auto_point = None
+        if hasattr(self, "_mark"):
+            self._mark.hide()
+
+    def _pointer_global(self) -> QPoint:
+        if self._auto_point is not None:
+            return self._auto_point
+        return QCursor.pos()
+
+    def _auto_tick(self) -> None:
+        viewport = self._scroll.viewport()
+        if viewport is None or not self._mark.isVisible():
+            self._stop_autoscroll()
+            return
+        local = viewport.mapFromGlobal(self._pointer_global())
+        self._scroll_by(
+            _auto_speed(local.x() - self._auto_origin.x()),
+            _auto_speed(local.y() - self._auto_origin.y()),
+        )
+
+    def _scroll_by(self, dx: int, dy: int) -> None:
+        if dx:
+            bar = self._scroll.horizontalScrollBar()
+            bar.setValue(bar.value() + int(dx))
+        if dy:
+            bar = self._scroll.verticalScrollBar()
+            bar.setValue(bar.value() + int(dy))
 
     def _scroll_vertically(self, widget: QWidget) -> None:
         top = widget.mapTo(self._page, widget.rect().topLeft()).y()
@@ -889,11 +1258,39 @@ class VpeViewerView(QWidget):
         self._copy.setText("복사됨")
         QTimer.singleShot(1400, lambda: self._copy.setText("iRule 소스 복사"))
 
-    def _set_detail(self, text: str, irule_source: str = "") -> None:
-        self._detail.setPlainText(text)
-        self._copy_text = irule_source
-        self._copy.setVisible(bool(irule_source))
+    def _set_detail(
+        self,
+        text: str,
+        irules: list[tuple[str, str]] | None = None,
+        cards: list[tuple[str, list[str]]] | None = None,
+        sections: list[str] | None = None,
+    ) -> None:
+        codes = [(title, source) for title, source in (irules or []) if source]
+        boxes = [(title, lines) for title, lines in (cards or []) if lines]
+        extra = [piece for piece in (sections or []) if piece]
+        if codes or boxes or extra:
+            self._detail.setHtml(detail_document_html(text, codes, boxes, extra))
+            self._copy_text = "\n\n".join(source for _title, source in codes)
+        else:
+            self._detail.setPlainText(text)
+            self._apply_detail_spacing()
+            self._copy_text = ""
+        self._copy.setVisible((not self._detail.isHidden()) and bool(self._copy_text))
         self._copy.setText("iRule 소스 복사")
+
+    def _apply_detail_spacing(self) -> None:
+        cursor = self._detail.textCursor()
+        cursor.beginEditBlock()
+        cursor.select(QTextCursor.SelectionType.Document)
+        block_fmt = QTextBlockFormat()
+        block_fmt.setLineHeight(
+            160.0,
+            QTextBlockFormat.LineHeightTypes.ProportionalHeight.value,
+        )
+        cursor.mergeBlockFormat(block_fmt)
+        cursor.clearSelection()
+        cursor.endEditBlock()
+        self._detail.moveCursor(QTextCursor.MoveOperation.Start)
 
     def _show_overview(self, policy: dict) -> None:
         lines = [
@@ -962,17 +1359,18 @@ class VpeViewerView(QWidget):
         ]
         if node.get("macro"):
             lines.append(f"매크로  {node.get('macro')}")
+        sections: list[str] = []
         agents = [agent for agent in (node.get("agent_details") or []) if isinstance(agent, dict)]
         if agents:
-            lines.extend(["", "에이전트 설정"])
             for agent in agents:
-                lines.append(f"- {agent.get('name') or agent.get('agent_kind') or agent.get('type') or ''}")
-                for key, value in agent.items():
-                    if key in {"name", "_items", "_value"} or value in (None, "", [], {}):
-                        continue
-                    if isinstance(value, (dict, list)):
-                        continue
-                    lines.append(f"    {key}: {value}")
+                raw_name = str(
+                    agent.get("name") or agent.get("agent_kind") or agent.get("type") or "에이전트"
+                )
+                title = raw_name.rsplit("/", 1)[-1]
+                kind = str(agent.get("agent_kind") or agent.get("type") or "")
+                if kind and kind not in title:
+                    title = f"{title}  ({kind})"
+                sections.append(object_section_html(title, agent))
         elif node.get("agents"):
             names = []
             for agent in node.get("agents") or []:
@@ -980,14 +1378,13 @@ class VpeViewerView(QWidget):
                     names.append(str(agent.get("type") or agent.get("name") or ""))
             lines.extend(["", "에이전트  " + ", ".join(name for name in names if name)])
         edges = [edge for edge in (graph.get("edges") or []) if edge.get("from") == node.get("id")]
-        lines.extend(["", "분기"])
-        if not edges:
-            lines.append("—")
         for edge in edges:
             dest = str(edge.get("to") or "").rsplit("/", 1)[-1]
-            lines.append(f"{edge.get('caption') or ''} → {dest}")
+            title = str(edge.get("caption") or "").strip() or "분기"
+            body = [f"→ {dest}"]
             if edge.get("expression"):
-                lines.append(str(edge["expression"]))
+                body.append(str(edge["expression"]))
+            sections.append(section_card(title, body))
         irules, agent_ids, has_virtual = self._lookup_irules(node, graph)
         from app.modules.vpe_viewer.parser import _path_refs
 
@@ -997,13 +1394,19 @@ class VpeViewerView(QWidget):
             for ref in _path_refs(node.get("agent_details") or [], objects)
             if (ref.get("object") or {}).get("object_kind") != "ltm rule"
         ]
-        if refs:
-            lines.extend(["", "참조 객체"])
-            for ref in refs:
-                title = str(ref.get("name") or "").rsplit("/", 1)[-1]
-                kind = (ref.get("object") or {}).get("object_kind") or ref.get("key") or ""
-                lines.append(f"- {title}  ({kind})")
-        sources: list[str] = []
+        for ref in refs:
+            obj = ref.get("object") if isinstance(ref.get("object"), dict) else {}
+            name = str(ref.get("name") or obj.get("name") or "참조 객체")
+            title = name.rsplit("/", 1)[-1] or name
+            kind = str(obj.get("object_kind") or "")
+            if kind:
+                title = f"{title}  ({kind})"
+            lead: list[tuple[str, str]] = []
+            key = str(ref.get("key") or "")
+            if key:
+                lead.append(("연결", field_label(key)))
+            sections.append(object_section_html(title, obj, lead=lead, skip_kind=True))
+        codes: list[tuple[str, str]] = []
         if irules:
             lines.extend(["", "iRule"])
             for rule in irules:
@@ -1011,15 +1414,14 @@ class VpeViewerView(QWidget):
                 lines.append(f"- {title}  ({rule.get('object_kind') or 'ltm rule'})")
                 source = str(rule.get("source") or "")
                 if source:
-                    sources.append(f"# {title}\n{source}")
-                    lines.extend(["", source, ""])
+                    codes.append((title, source))
         elif agent_ids and has_virtual:
             lines.extend(["", f"Access Profile이 적용된 Virtual Server iRule에서 agent_id {', '.join(agent_ids)} 를 찾지 못했습니다."])
         elif agent_ids:
             lines.extend(["", f"이 Access Profile에는 적용된 Virtual Server가 없고, 전체 ltm rule에서도 agent_id {', '.join(agent_ids)} 를 찾지 못했습니다."])
         if agent_ids and irules and not has_virtual:
             lines.extend(["", "이 Access Profile에는 적용된 Virtual Server가 없어 전체 ltm rule에서 agent_id로 찾았습니다."])
-        self._set_detail("\n".join(lines), "\n\n".join(sources))
+        self._set_detail("\n".join(lines), codes, sections=sections)
 
     def _fit(self) -> None:
         viewport = self._scroll.viewport()

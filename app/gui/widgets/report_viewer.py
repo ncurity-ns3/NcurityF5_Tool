@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QUrl
+from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QLabel, QTextBrowser, QVBoxLayout, QWidget
 
 try:
@@ -19,38 +20,44 @@ class ReportViewer(QWidget):
         super().__init__(parent)
         self._layout = QVBoxLayout(self)
         self._view: QWidget | None = None
-        self._placeholder = QLabel("Run Health Check 후 리포트가 여기에 표시됩니다.")
+        self._placeholder = QLabel("보고서를 여는 중…")
         self._placeholder.setWordWrap(True)
         self._layout.addWidget(self._placeholder)
 
     def _ensure_view(self) -> None:
         if self._view is not None:
             return
-        self._placeholder.hide()
         if webengine_available():
             from PyQt6.QtWebEngineWidgets import QWebEngineView
 
-            self._view = QWebEngineView()
-            if QWebEnginePage is not None:
-                page = self._view.page()
-                if isinstance(page, QWebEnginePage):
+            view = QWebEngineView()
+            view.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
+            page = view.page()
+            if QWebEnginePage is not None and isinstance(page, QWebEnginePage):
+                page.setBackgroundColor(QColor("#F7F9FC"))
 
-                    def _on_load_finished(ok: bool) -> None:
-                        if not ok or not isinstance(self._view, QWebEngineView):
-                            return
+                def _on_load_finished(ok: bool) -> None:
+                    if not isinstance(self._view, QWebEngineView):
+                        return
+                    if ok:
                         self._view.setZoomFactor(1.0)
-                        page.runJavaScript(
-                            "document.querySelectorAll('table').forEach("
-                            "t => { t.style.tableLayout = 'fixed'; });"
-                        )
+                    self._placeholder.hide()
+                    self._view.show()
 
-                    page.loadFinished.connect(_on_load_finished)
+                page.loadFinished.connect(_on_load_finished)
+            view.hide()
+            self._view = view
+            if QWebEnginePage is None or not isinstance(page, QWebEnginePage):
+                self._placeholder.hide()
+                view.show()
         else:
-            self._view = QTextBrowser()
-            self._view.setPlaceholderText(
+            self._placeholder.hide()
+            browser = QTextBrowser()
+            browser.setPlaceholderText(
                 "html 미리보기: PyQt6-WebEngine 필요 (개발 PC에서만 pip install)\n"
                 "현장 배포 exe에는 포함 예정"
             )
+            self._view = browser
         self._layout.addWidget(self._view)
 
     def load_html_file(self, path: Path) -> None:

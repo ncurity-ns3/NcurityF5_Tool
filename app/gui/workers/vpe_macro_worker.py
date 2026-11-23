@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import httpx
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, pyqtSignal
 from pydantic import SecretStr
 
 from app.core.bigip_client import BigipClient
@@ -39,6 +39,7 @@ class VpeMacroJob:
     target_profile_path: str = ""
     target_macro_name: str = ""
     source_hostname: str = ""
+    include_customization: bool = False
     target_profile: AccessProfileRef | None = None
 
 
@@ -103,6 +104,34 @@ def _client(job: VpeMacroJob, *, change_mode: bool = False, timeout: float = 120
         safety_gate=SafetyGate(change_mode_enabled=change_mode),
         timeout=timeout,
     )
+
+
+class _ThreadPark(QObject):
+    """Keep finished QThreads alive. Deleting one while its signal is still
+    on the stack is an access violation on this Qt build.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._items: list[QThread] = []
+
+    def keep(self, worker: QThread) -> None:
+        if worker in self._items:
+            return
+        self._items.append(worker)
+
+
+_park: _ThreadPark | None = None
+
+
+def release_qthread(worker: QThread | None) -> None:
+    """Do not destroy a QThread from the slot it just signaled."""
+    global _park
+    if worker is None or QThread.currentThread() is worker:
+        return
+    if _park is None:
+        _park = _ThreadPark()
+    _park.keep(worker)
 
 
 class VpeMacroWorker(QThread):
@@ -230,6 +259,7 @@ class VpeMacroWorker(QThread):
             },
             existing_items=[],
             target_macro_name=self.job.target_macro_name or None,
+            include_customization=self.job.include_customization,
             progress=self.progress.emit,
         )
         return VpeMacroResult(

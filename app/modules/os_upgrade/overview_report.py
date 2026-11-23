@@ -135,6 +135,15 @@ def render_overview_html(reports: list[DeviceOverviewReport], *, title: str) -> 
             '<td class="remark cmd">tmsh list net route</td>'
             "</tr>"
         )
+        group_name = report.device_group_name or "—"
+        group_cls = "result empty" if group_name == "—" else "result"
+        parts.append(
+            "<tr>"
+            "<th>Device Group</th>"
+            f'<td class="{group_cls}">{html.escape(group_name)}</td>'
+            '<td class="remark cmd">GET /tm/cm/device-group</td>'
+            "</tr>"
+        )
 
         parts.append("</tbody></table>")
 

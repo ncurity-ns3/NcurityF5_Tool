@@ -4,7 +4,7 @@ import json
 import re
 from collections import defaultdict
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
@@ -1320,6 +1320,57 @@ def load_policy_and_items(
     return policy, items
 
 
+def parse_access_policy_captions(text: str) -> dict[str, str]:
+    """Map an access-policy object name to its VPE caption. Caption only, not the body."""
+    found: dict[str, str] = {}
+    current = ""
+    for line in (text or "").splitlines():
+        header = re.search(r"access-policy\s+(\S+)", line, re.I)
+        if header:
+            token = header.group(1).strip().strip("{")
+            current = token.rstrip("/").split("/")[-1]
+            continue
+        match = re.search(r"\bcaption\s+(?:\"([^\"]*)\"|(\S+))", line)
+        if match and current:
+            found[current] = match.group(1) if match.group(1) is not None else match.group(2)
+            current = ""
+    return found
+
+
+def _tmsh_macro_captions(
+    client: ApmRestClient,
+    names: list[str],
+    *,
+    partition: str,
+) -> dict[str, str]:
+    """One caption field per macro. Do not list the policy body."""
+    runner = getattr(client, "run_util_bash", None)
+    if not callable(runner) or not names:
+        return {}
+    part = partition or "Common"
+    commands: list[str] = []
+    for name in names[:40]:
+        short = name.rstrip("/").split("/")[-1]
+        if not short or not re.fullmatch(r"[A-Za-z0-9_.-]+", short):
+            continue
+        commands.append(
+            f"echo ---NCURITY---; tmsh -q list apm policy access-policy /{part}/{short} caption"
+        )
+    if not commands:
+        return {}
+    try:
+        text = _run_tmsh_capped(
+            client,
+            runner,
+            " ; ".join(commands),
+            timeout=12.0,
+            max_bytes=32_768,
+        )
+    except (TimeoutError, OSError, RuntimeError):
+        return {}
+    return parse_access_policy_captions(text)
+
+
 def list_macros_for_profile(
     client: ApmRestClient,
     profile: AccessProfileRef,
@@ -1330,6 +1381,21 @@ def list_macros_for_profile(
         progress("tmsh로 Macro 이름 조회 중…")
     policy = load_access_policy(client, profile, progress=progress)
     macros = build_macro_summaries(policy=policy, items=[])
+    captions = _tmsh_macro_captions(
+        client,
+        [macro.name for macro in macros],
+        partition=profile.partition or "Common",
+    )
+    if captions:
+        if progress is not None:
+            progress("Macro 표시 이름 확인 중…")
+        macros = [
+            replace(macro, caption=captions[macro.name])
+            if captions.get(macro.name)
+            else macro
+            for macro in macros
+        ]
+        macros.sort(key=lambda macro: (macro.caption.lower(), macro.full_path.lower()))
     return policy, [], macros
 
 
@@ -1495,18 +1561,29 @@ def _snapshot_from_tmsh_boxes(
         for agent in (boxes.get("agents") or [])
         if isinstance(agent, dict)
     ]
-    return build_snapshot(
+    snapshot = build_snapshot(
         profile=profile,
         policy=policy,
         items=selected,
         macro=rich,
         agents=records,
-        warnings=[
-            "서버, 커스터마이즈 그룹, 리소스, SMTP 이름은 저장하지 않습니다."
-        ],
+        warnings=[],
         source_host=source_host,
         source_hostname=source_hostname,
     )
+    saved_files = {
+        str(agent.get("name") or ""): agent.get("customization_files")
+        for agent in (boxes.get("agents") or [])
+        if isinstance(agent, dict)
+    }
+    for payload in snapshot.agents:
+        files = saved_files.get(str(payload.get("name") or ""))
+        if isinstance(files, list) and files:
+            payload["customization_files"] = files
+    extra = boxes.get("customization_notes")
+    if isinstance(extra, list):
+        snapshot.warnings.extend(str(note) for note in extra if note)
+    return snapshot
 
 
 def export_macro_snapshot(
@@ -1524,7 +1601,10 @@ def export_macro_snapshot(
     if callable(runner) and macro.full_path:
         try:
             boxes = collect_macro_boxes(
-                runner, macro.full_path, progress=progress
+                runner,
+                macro.full_path,
+                profile_name=profile.name,
+                progress=progress,
             )
         except TimeoutError as exc:
             raise MacroApplyError(
@@ -1938,11 +2018,11 @@ def build_apply_plan(
             "스냅샷에 연결할 Macro 이름이 없습니다. Macro 파일을 다시 저장하세요."
         )
 
-    warnings = list(snapshot.warnings)
-    warnings.append(
-        "같은 이름 Macro가 있으면 목록에서 마지막 번호를 찾아 다음 번호로 만듭니다. "
-        "원본 Access Profile의 Macro는 그대로 둡니다."
-    )
+    warnings = [
+        note
+        for note in snapshot.warnings
+        if note and "Web Customizing" not in note and "같은 이름 Macro" not in note
+    ]
 
     return ApplyPlan(
         target_profile=target_profile.full_path,
@@ -2442,6 +2522,11 @@ def _already_exists_text(text: str) -> bool:
     return "already exists" in (text or "").lower()
 
 
+def _already_exists_paths(text: str) -> list[str]:
+    body = _without_transaction_noise(text)
+    return re.findall(r"\((/[^)\s]+)\)", body)
+
+
 def _exists_error_is_child_object(text: str) -> bool:
     low = (text or "").lower()
     return any(
@@ -2579,10 +2664,23 @@ def _tmsh_create_macro_on_profile(
                 "로 생겼는지 확인하세요. 목록에 없으면 생성되지 않은 것입니다."
             ) from exc
         if script_for is not None and _already_exists_text(created):
+            paths = _already_exists_paths(created)
+            stem = actual.lower()
+            own = []
+            for path in paths:
+                short = split_full_path(path)[1].lower()
+                if short == stem or short.startswith(stem + "_") or short.startswith(stem + "-"):
+                    own.append(path)
+            if paths and not own:
+                raise MacroApplyError(
+                    "새 Macro의 안쪽 이름이 장비에 있는 객체와 같습니다. "
+                    "원본 Logon Page나 Agent를 다시 만들지 않도록 이름을 바꿨어야 합니다. "
+                    + _tmsh_error_excerpt(created)
+                )
             if bumped:
                 raise MacroApplyError(
                     f"{actual} 또는 그 안쪽 항목이 이미 있어 새 Macro를 만들지 못했습니다. "
-                    f"{created[:180]}"
+                    + _tmsh_error_excerpt(created)
                 )
             bumped = True
             used.append(actual)
@@ -2603,7 +2701,8 @@ def _tmsh_create_macro_on_profile(
         if _already_exists_text(created):
             if bumped:
                 raise MacroApplyError(
-                    f"{actual} 이(가) 이미 있어 새 Macro를 만들지 못했습니다. {created[:180]}"
+                    f"{actual} 이(가) 이미 있어 새 Macro를 만들지 못했습니다. "
+                    + _tmsh_error_excerpt(created)
                 )
             bumped = True
             used.append(actual)
@@ -2653,6 +2752,7 @@ def apply_macro_snapshot(
     existing_items: list[dict[str, Any]],
     check_external: bool = False,
     target_macro_name: str | None = None,
+    include_customization: bool = False,
     progress: Callable[[str], None] | None = None,
 ) -> ApplyResult:
     del existing_policy, existing_items, check_external
@@ -2738,13 +2838,32 @@ def apply_macro_snapshot(
         f"결과: {mode}",
         "대상 Access Profile VPE Macro 목록에서 확인하세요.",
     ]
+    if not include_customization:
+        _progress("Web Customizing Load가 꺼져 있어 파일을 넣지 않습니다.")
+    elif flow:
+        runner = getattr(client, "run_util_bash", None)
+        if callable(runner):
+            from app.modules.vpe_macro.customization import apply_saved_customization
+
+            notes = apply_saved_customization(
+                runner,
+                partition=target_profile.partition or "Common",
+                source_name=source_name,
+                actual=actual_name,
+                agents=saved_agents,
+                target_profile=target_profile.name,
+                progress=_progress,
+            )
+            for note in notes:
+                _progress(note)
+            messages.extend(notes)
     return ApplyResult(
         created_agents=[],
         created_items=[actual_name],
         skipped=[],
         applied_policy=True,
         generation_incremented=False,
-        messages=messages + list(snapshot.warnings),
+        messages=messages,
     )
 
 

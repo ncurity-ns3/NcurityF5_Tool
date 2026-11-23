@@ -27,6 +27,12 @@ cm device /Common/bigip1 {
     version 17.1.2.1
     management-ip 10.255.122.40
 }
+cm device-group /Common/device_trust_group {
+    type sync-only
+}
+cm device-group /Common/sync-failover-group {
+    type sync-failover
+}
 
 net vlan internal {
     interfaces {
@@ -105,6 +111,7 @@ def test_read_ucs_and_extract(tmp_path: Path) -> None:
     assert len(result.check.vlan_rows) >= 1
     assert len(result.check.self_ip_rows) >= 1
     assert any(r.gw == "10.0.1.1" for r in result.check.route_rows)
+    assert result.check.device_group == "sync-failover-group"
     assert result.check.license_check is not None
 
 

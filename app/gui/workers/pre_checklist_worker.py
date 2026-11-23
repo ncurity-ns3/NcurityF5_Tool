@@ -85,7 +85,7 @@ class PreChecklistWorker(QThread):
                         conn,
                         target_ver,
                         internet_available=online,
-                        include_license_check=(self.phase == "pre"),
+                        include_license_check=True,
                         on_step=on_step,
                     )
                 )

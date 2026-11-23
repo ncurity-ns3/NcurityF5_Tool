@@ -65,11 +65,13 @@ class HomeView(QWidget):
         info_layout.addWidget(info_title)
         info_layout.addWidget(
             QLabel(
-                "• <b>Device Check</b> — 정기 점검, OS 업그레이드 간 점검, 납품확인서 작성<br>"
+                "• <b>Device Check</b> — 정기 점검, OS 업그레이드 간 점검, "
+                "SSL 인증서 확인, 납품확인서 작성<br>"
                 "• <b>WAF</b> — OWASP Top 10 취약점 공격은 항목별 차단 요약, "
                 "Custom 공격 구문은 직접 전송<br>"
                 "• <b>VPE Viewer</b> — qkview / UCS / bigip.conf의 APM Access Policy 흐름<br>"
                 "• <b>VPE Macro Copy</b> — 로그인 후 Access Profile의 Macro 조회·복제·저장<br>"
+                "• <b>Host Content 추출</b> — UCS의 Hosted Content 목록을 보고 폴더로 추출<br>"
                 "• 저장 Session/장비 목록은 점검 메뉴에서 동일 경로 공유<br>"
                 "• 리포트 HTML은 작업 폴더에 저장 · Report 버튼으로 미리보기"
             )

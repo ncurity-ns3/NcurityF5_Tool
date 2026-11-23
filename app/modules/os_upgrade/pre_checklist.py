@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from app.core.bigip_client import BigipClient
 from app.core.models import ConnectionProfile
+from app.modules.os_upgrade.device_group import read_device_group_name
 from app.modules.os_upgrade.k7727_versions import BigIpTargetVersion
 from app.modules.os_upgrade.pre_checklist_parsers import (
     ArpRow,
@@ -35,6 +36,7 @@ class PreChecklistReport:
         self.vlan_mac_rows: list[VlanMacRow] = []
         self.arp_rows: list[ArpRow] = []
         self.gateway_pings: list[GatewayPingRow] = []
+        self.device_group_name = "—"
         self.ha_check: HaCheckResult | None = None
         self.linux_check: LinuxCheckResult | None = None
         self.errors: list[str] = []
@@ -112,6 +114,13 @@ def collect_pre_checklist(
                     GatewayPingRow(gw=gw, result="ERROR", detail=str(exc)[:200])
                 )
         report.gateway_pings = pings
+
+        step("Device Group")
+        try:
+            report.device_group_name = read_device_group_name(client)
+        except Exception as exc:  # noqa: BLE001
+            report.device_group_name = "—"
+            report.errors.append(f"Device Group: {exc}"[:160])
 
         step("HA / Failover")
         fo_show = client.run_util_bash("tmsh show sys failover 2>/dev/null")

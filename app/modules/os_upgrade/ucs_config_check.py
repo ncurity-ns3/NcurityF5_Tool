@@ -5,6 +5,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from app.modules.os_upgrade.device_group import (
+    choose_device_group_names,
+    device_group_entries_from_config,
+)
 from app.modules.os_upgrade.k7727_versions import BigIpTargetVersion, find_version_entry
 from app.modules.os_upgrade.overview_parsers import _cidr, _is_floating_self_block
 from app.modules.os_upgrade.pre_checklist import LicenseUpgradeCheck
@@ -52,6 +56,7 @@ class UcsConfigCheckResult:
     vlan_rows: list[UcsVlanRow] = field(default_factory=list)
     self_ip_rows: list[UcsSelfIpRow] = field(default_factory=list)
     route_rows: list[UcsRouteRow] = field(default_factory=list)
+    device_group: str = ""
     license_check: LicenseUpgradeCheck | None = None
     errors: list[str] = field(default_factory=list)
 
@@ -335,6 +340,9 @@ def analyze_ucs_config_texts(
     result.vlan_rows = parse_ucs_vlan_rows(base)
     result.self_ip_rows = parse_ucs_self_ip_rows(base)
     result.route_rows = parse_ucs_route_rows(conf)
+    group_entries = device_group_entries_from_config(conf)
+    group_entries.extend(device_group_entries_from_config(base))
+    result.device_group = choose_device_group_names(group_entries)
 
     if not dev.get("hostname"):
         result.errors.append("cm device (self-device) 정보 없음")

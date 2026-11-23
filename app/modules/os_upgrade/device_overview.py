@@ -6,6 +6,7 @@ from app.core.bigip_client import BigipClient
 from app.core.f5os_client import F5osClient
 from app.core.models import ConnectionProfile, PlatformKind
 from app.modules.health_check.tmos_bash_parse import parse_ha_status
+from app.modules.os_upgrade.device_group import read_device_group_name
 from app.modules.os_upgrade.overview_parsers import (
     RouteRow,
     SelfIpRow,
@@ -13,9 +14,9 @@ from app.modules.os_upgrade.overview_parsers import (
     build_f5os_vlan_table,
     build_self_ip_rows,
     build_tmos_vlan_table,
-    parse_tmos_list_net_route,
     parse_f5os_platform_state,
     parse_net_self_entries,
+    parse_tmos_list_net_route,
     parse_tmos_platform_hw,
     parse_tmos_show_sys_version,
     resolve_tmos_serial,
@@ -54,6 +55,7 @@ class DeviceOverviewReport:
         self.vlan_rows: list[VlanRow] = []
         self.self_ip_rows: list[SelfIpRow] = []
         self.route_rows: list[RouteRow] = []
+        self.device_group_name = "—"
         self.errors: list[str] = []
 
     def status_for(self, item: str) -> str:
@@ -158,6 +160,13 @@ def collect_device_overview(
         step("Route")
         route_text = client.run_util_bash("tmsh list net route")
         report.route_rows = parse_tmos_list_net_route(route_text)
+
+        step("Device Group")
+        try:
+            report.device_group_name = read_device_group_name(client)
+        except Exception as exc:  # noqa: BLE001
+            report.device_group_name = "—"
+            report.errors.append(f"Device Group: {exc}"[:160])
 
         f5os_ver = _BLANK
         f5os_mgmt = _BLANK

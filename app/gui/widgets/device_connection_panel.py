@@ -42,6 +42,7 @@ from app.gui.widgets.multi_device_entry import DeviceRowData
 from app.gui.widgets.multi_device_table import MultiDeviceTablePanel
 from app.gui.widgets.ncurity_radio import NcurityRadioButton
 from app.gui.workers.test_connection_worker import TestConnectionWorker
+from app.gui.workers.vpe_macro_worker import release_qthread
 
 
 class DeviceConnectionPanel(QWidget):
@@ -512,7 +513,7 @@ class DeviceConnectionPanel(QWidget):
             worker.finished.disconnect(self._on_test_thread_finished)
         except TypeError:
             pass
-        worker.deleteLater()
+        release_qthread(worker)
 
     def _on_test_thread_finished(self) -> None:
         self._restore_test_controls()
@@ -522,7 +523,7 @@ class DeviceConnectionPanel(QWidget):
         if worker is self._test_worker:
             self._release_test_worker()
         else:
-            worker.deleteLater()
+            release_qthread(worker)
 
     def _stop_test_worker(self, *, wait_ms: int = 30_000) -> None:
         worker = self._test_worker
@@ -530,14 +531,12 @@ class DeviceConnectionPanel(QWidget):
             return
         if worker.isRunning():
             worker.requestInterruption()
-            if not worker.wait(wait_ms):
-                worker.terminate()
-                worker.wait(2000)
+            worker.wait(min(wait_ms, 1000))
         self._restore_test_controls()
         if worker is self._test_worker:
             self._release_test_worker()
         elif not worker.isRunning():
-            worker.deleteLater()
+            release_qthread(worker)
 
     def _register_sessions(self, outcome: ConnectionTestOutcome) -> None:
         for reg in outcome.sessions:

@@ -141,6 +141,15 @@ class WafView(QWidget):
         cases_layout.addWidget(scroll, stretch=1)
         root.addWidget(cases_card, stretch=1)
 
+        phrase = QHBoxLayout()
+        phrase.setSpacing(8)
+        phrase.addWidget(_field_label("차단 여부 구문"))
+        self.block_phrase = QLineEdit()
+        self.block_phrase.setPlaceholderText("예: 200 OK, Blocked")
+        self.block_phrase.setClearButtonEnabled(True)
+        phrase.addWidget(self.block_phrase, stretch=1)
+        root.addLayout(phrase)
+
         buttons = QHBoxLayout()
         buttons.setSpacing(8)
         self.send_btn = QPushButton("전송")
@@ -177,7 +186,9 @@ class WafView(QWidget):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         root.addWidget(self.summary, stretch=1)
         note = QLabel(
-            "차단은 HTTP 403·406·429이거나 응답에 Request Rejected / Support ID가 있는 경우입니다. "
+            "차단 여부 구문이 응답 URL, 경로, 파라미터, 헤더, 본문 가운데 있으면 차단입니다. "
+            "구문이 비어 있으면 HTTP 403·406·429이거나 "
+            "Request Rejected / Support ID일 때 차단입니다. "
             "그 외 응답은 통과, 연결 실패와 시간 초과는 실패입니다."
         )
         note.setWordWrap(True)
@@ -291,7 +302,7 @@ class WafView(QWidget):
         self.report_btn.setEnabled(False)
         self._set_running(True)
         self.status_label.setText("전송 중")
-        worker = WafPocWorker(cases, target)
+        worker = WafPocWorker(cases, target, block_phrase=self.block_phrase.text())
         worker.log_line.connect(self._append_log)
         worker.run_done.connect(self._on_done)
         worker.run_failed.connect(self._on_failed)
@@ -372,6 +383,7 @@ class WafView(QWidget):
         self.port.setEnabled(not running)
         self.custom_scheme.setEnabled(not running)
         self.select_all.setEnabled((not running) and bool(self._checks))
+        self.block_phrase.setEnabled(not running)
         for box in self._checks.values():
             box.setEnabled(not running)
 

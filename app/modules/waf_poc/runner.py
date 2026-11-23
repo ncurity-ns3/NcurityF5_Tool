@@ -85,6 +85,8 @@ def run_cases(
     target: Target,
     on_text: Callable[[str], None],
     runner: CurlRunner | None = None,
+    *,
+    block_phrase: str = "",
 ) -> SendSummary:
     active = runner or CurlRunner()
     jobs: list[tuple[PocCase, str]] = []
@@ -102,7 +104,12 @@ def run_cases(
         rewritten, argv = build_curl_argv(command, target, curl_bin)
         on_text(f"{index}/{total}  {case.group} · {case.title}")
         code, output, timed_out = active.run_one(argv)
-        outcome, http_code = classify_response(output, timed_out=timed_out, return_code=code)
+        outcome, http_code = classify_response(
+            output,
+            timed_out=timed_out,
+            return_code=code,
+            block_phrase=block_phrase,
+        )
         results.append(
             RequestResult(
                 group=case.group,

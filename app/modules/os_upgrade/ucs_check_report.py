@@ -83,6 +83,17 @@ def render_ucs_check_html(units: list[UcsConfigCheckResult], *, title: str) -> s
                 )
             parts.append("</table></div>")
 
+        group_name = unit.device_group or "없음"
+        parts.append("<h3>Device Group</h3><table>")
+        parts.append(
+            "<tr>"
+            "<th>Device Group</th>"
+            f"<td>{html.escape(group_name)}</td>"
+            "<td class='muted'>bigip.conf · cm device-group</td>"
+            "</tr>"
+        )
+        parts.append("</table>")
+
     parts.append("</body></html>")
     return "".join(parts)
 

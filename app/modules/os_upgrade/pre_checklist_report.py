@@ -235,6 +235,14 @@ def render_pre_checklist_html(
         )
         n += 1
 
+        group_name = report.device_group_name or "—"
+        parts.append(
+            f"<tr><th>{n}. Device Group</th>"
+            f'<td class="result">{html.escape(group_name)}</td>'
+            '<td class="remark cmd">GET /tm/cm/device-group</td></tr>'
+        )
+        n += 1
+
         ha_cell, ha_remark = _render_ha(report)
         parts.append(
             f"<tr><th>{n}. 이중화 / Failover</th>"

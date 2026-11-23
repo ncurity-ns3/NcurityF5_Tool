@@ -141,6 +141,17 @@ class WafCustomView(QWidget):
         polish_widget_scrollbars(scroll)
         root.addWidget(scroll, stretch=1)
 
+        phrase = QHBoxLayout()
+        phrase.setSpacing(8)
+        phrase_label = QLabel("차단 여부 구문")
+        phrase_label.setProperty("role", "muted")
+        self.block_phrase = QLineEdit()
+        self.block_phrase.setPlaceholderText("예: 200 OK, Blocked")
+        self.block_phrase.setClearButtonEnabled(True)
+        phrase.addWidget(phrase_label)
+        phrase.addWidget(self.block_phrase, stretch=1)
+        root.addLayout(phrase)
+
         bar = QWidget()
         bar.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         buttons = QHBoxLayout(bar)
@@ -544,6 +555,7 @@ class WafCustomView(QWidget):
             login=login,
             login_only=login_only,
             carry_cookies=self.carry_cookies.isChecked(),
+            block_phrase=self.block_phrase.text(),
         )
         worker.log_line.connect(self._append_log)
         worker.run_done.connect(self.status_label.setText)
@@ -578,6 +590,7 @@ class WafCustomView(QWidget):
         self.send_btn.setEnabled(not running)
         self.login_btn.setEnabled(not running)
         self.stop_btn.setEnabled(running)
+        self.block_phrase.setEnabled(not running)
 
 
 def _heading(text: str) -> QLabel:

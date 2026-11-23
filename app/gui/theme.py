@@ -325,9 +325,10 @@ QSpinBox[formControl="portSpin"] {{
     background-color: {BG_SURFACE};
     border: 1px solid {BORDER};
     border-radius: 6px;
-    padding: 4px 8px;
-    min-height: 0px;
-    max-height: 32px;
+    padding: 2px 12px;
+    min-width: 140px;
+    min-height: 36px;
+    max-height: 36px;
     selection-background-color: {NAV_SELECTED_BG};
     selection-color: {BRAND_PRIMARY};
 }}
@@ -357,6 +358,7 @@ QComboBox[formControl="formCombo"] {{
     max-height: 36px;
     font-family: {FONT_FAMILY_CSS};
     font-size: 10pt;
+    font-weight: 400;
     border-radius: 8px;
 }}
 QComboBox[formControl="tableCombo"] {{
@@ -452,6 +454,15 @@ QFrame#navHeader {{
     background-color: {BG_SIDEBAR};
     border: none;
     border-bottom: 1px solid {BORDER};
+}}
+QAbstractButton#navToggle, QAbstractButton#vpePanelToggle {{
+    background: transparent;
+    border: none;
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    padding: 0;
 }}
 QListWidget#navList {{
     background-color: {BG_SIDEBAR};
@@ -651,6 +662,47 @@ QLineEdit:focus {{
 QLineEdit[formControl="tableLine"]:focus {{
     border: 1px solid {BRAND_ACCENT};
 }}
+QLineEdit[formControl="formLine"] {{
+    padding: 4px 12px;
+    min-height: 36px;
+    max-height: 36px;
+    font-family: {FONT_FAMILY_CSS};
+    font-size: 10pt;
+    font-weight: 400;
+}}
+QLabel[role="formLabel"] {{
+    font-family: {FONT_FAMILY_CSS};
+    font-size: 10pt;
+    font-weight: 500;
+    color: {TEXT};
+}}
+QTabWidget#releaseNotesTabs::pane {{
+    border: 1px solid {BORDER};
+    border-radius: 10px;
+    background: {BG_SURFACE};
+    top: -1px;
+}}
+QTabWidget#releaseNotesTabs QTabBar::tab {{
+    background: transparent;
+    color: {TEXT_MUTED};
+    border: 1px solid transparent;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    padding: 8px 14px;
+    margin-right: 4px;
+    font-size: 13px;
+    font-weight: 500;
+}}
+QTabWidget#releaseNotesTabs QTabBar::tab:selected {{
+    background: {BG_SURFACE};
+    color: {BRAND_PRIMARY};
+    border: 1px solid {BORDER};
+    border-bottom-color: {BG_SURFACE};
+    font-weight: 600;
+}}
+QTabWidget#releaseNotesTabs QTabBar::tab:hover {{
+    color: {BRAND_PRIMARY};
+}}
 {spin_combo_styles}
 QTextEdit {{
     background-color: {BG_SURFACE};
@@ -662,14 +714,15 @@ QTextEdit {{
 }}
 QProgressBar {{
     border: 1px solid {BORDER};
-    border-radius: 6px;
+    border-radius: 0px;
     background-color: #F1F5F9;
     text-align: center;
     height: 18px;
 }}
 QProgressBar::chunk {{
     background-color: {BRAND_ACCENT};
-    border-radius: 5px;
+    border-radius: 0px;
+    margin: 0px;
 }}
 NcurityCheckBox {{
     background: transparent;
@@ -744,6 +797,35 @@ QTableWidget[role="deviceGrid"]::item:hover {{
 QTableWidget[role="deviceGrid"]::item:focus {{
     outline: none;
     border: none;
+}}
+QTableWidget[role="copyGrid"] {{
+    background-color: {BG_SURFACE};
+    gridline-color: #E2E8F0;
+    border: none;
+    color: {TEXT};
+    font-size: 13px;
+    outline: none;
+    selection-background-color: #E8F1FF;
+}}
+QTableWidget[role="copyGrid"]::item {{
+    padding: 6px 10px;
+    color: {TEXT};
+    border: none;
+}}
+QTableWidget[role="copyGrid"]::item:hover,
+QTableWidget[role="copyGrid"]::item:selected {{
+    background-color: #E8F1FF;
+    color: {TEXT};
+}}
+QTableWidget[role="copyGrid"] QHeaderView::section {{
+    background-color: #F1F5F9;
+    color: {TEXT};
+    font-size: 12px;
+    font-weight: 600;
+    padding: 10px 28px 10px 12px;
+    border: none;
+    border-right: 1px solid #E2E8F0;
+    border-bottom: 2px solid #CBD5E1;
 }}
 QTableWidget[role="deviceGrid"] QHeaderView::section {{
     background-color: #F1F5F9;

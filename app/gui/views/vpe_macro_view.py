@@ -13,7 +13,6 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMessageBox,
-    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -37,7 +36,12 @@ from app.gui.form_controls import create_form_combobox
 from app.gui.folder_utils import open_in_file_manager
 from app.gui.theme import mark_page_subtitle, mark_page_title, mark_primary_button, mark_secondary_button
 from app.gui.widgets.device_connection_panel import DeviceConnectionPanel
-from app.gui.workers.vpe_macro_worker import VpeMacroJob, VpeMacroResult, VpeMacroWorker
+from app.gui.workers.vpe_macro_worker import (
+    VpeMacroJob,
+    VpeMacroResult,
+    VpeMacroWorker,
+    release_qthread,
+)
 from app.modules.vpe_macro.apm_macro import AccessProfileRef, MacroSnapshot, MacroSummary
 from app.modules.vpe_macro.store import MacroSnapshotStore
 
@@ -59,6 +63,23 @@ def _pick_macro_json(parent: QWidget, *, title: str, start: str, save: bool) -> 
         return ""
     files = dialog.selectedFiles()
     return files[0] if files else ""
+
+
+def _wrap_dialog_text(text: str, width: int = 72) -> str:
+    words = (text or "").split()
+    if not words:
+        return ""
+    lines: list[str] = []
+    current = words[0]
+    for word in words[1:]:
+        piece = f"{current} {word}"
+        if len(piece) > width:
+            lines.append(current)
+            current = word
+        else:
+            current = piece
+    lines.append(current)
+    return "\n".join(lines)
 
 
 class VpeMacroView(QWidget):
@@ -85,6 +106,7 @@ class VpeMacroView(QWidget):
         self._load_dialog: LoadMacroDialog | None = None
         self._macro_picker: SavedMacroPickDialog | None = None
         self._loading: LoadingProgressDialog | None = None
+        self._held_widgets: list[QWidget] = []
         self._build_ui()
         self._set_workspace_enabled(False)
 
@@ -174,10 +196,6 @@ class VpeMacroView(QWidget):
         action_row.addStretch()
         work.addLayout(action_row)
         root.addWidget(self.workspace)
-
-        self.progress = QProgressBar()
-        self.progress.setVisible(False)
-        outer.addWidget(self.progress)
         outer.addWidget(self.status_label)
 
         self.log_view = QTextEdit()
@@ -204,14 +222,22 @@ class VpeMacroView(QWidget):
         self.shutdown_workers()
         super().closeEvent(event)
 
+    def _hold_widget(self, widget: QWidget | None) -> None:
+        """Hide a dialog and keep it. Deleting it during a repaint kills the process."""
+        if widget is None:
+            return
+        widget.hide()
+        if widget not in self._held_widgets:
+            self._held_widgets.append(widget)
+
     def shutdown_workers(self) -> None:
         self._stop_worker()
         self._close_loading()
         if self._load_dialog is not None:
-            self._load_dialog.close()
+            self._hold_widget(self._load_dialog)
             self._load_dialog = None
         if self._macro_picker is not None:
-            self._macro_picker.close()
+            self._hold_widget(self._macro_picker)
             self._macro_picker = None
         self._password = ""
         self.connection._stop_test_worker()
@@ -232,12 +258,9 @@ class VpeMacroView(QWidget):
         self.save_btn.setEnabled(enabled)
 
     def _set_busy(self, busy: bool, *, indeterminate: bool = True) -> None:
-        # range 0,0 is an animated busy bar. On this Qt build that animation
-        # overflows the stack and exits the exe during a long tmsh wait.
-        self.progress.setVisible(busy and indeterminate)
-        self.progress.setRange(0, 100)
-        self.progress.setValue(0 if busy else 100)
-        self.progress.setTextVisible(False)
+        # No progress bar here. Fusion draws a zero-width chunk and this
+        # process exits with 0xC0000005.
+        del indeterminate
         self.connection.test_btn.setEnabled(not busy)
         self.connection.disconnect_btn.setEnabled(not busy)
         self.refresh_btn.setEnabled(not busy and self._connected)
@@ -258,14 +281,12 @@ class VpeMacroView(QWidget):
     def _finish_loading(self) -> None:
         dialog = self._loading
         self._loading = None
-        if dialog is not None:
-            dialog.finish()
+        self._hold_widget(dialog)
 
     def _close_loading(self) -> None:
         dialog = self._loading
         self._loading = None
-        if dialog is not None:
-            dialog.fail_and_close()
+        self._hold_widget(dialog)
 
     def _stop_worker(self) -> None:
         worker = self._worker
@@ -277,12 +298,12 @@ class VpeMacroView(QWidget):
                 signal.disconnect()
             except TypeError:
                 pass
-        if worker.isRunning() and worker is not self.sender():
-            worker.requestInterruption()
-            worker.wait(3000)
+        release_qthread(worker)
 
     def _on_worker_ok(self, result: object) -> None:
+        worker = self._worker
         self._worker = None
+        release_qthread(worker)
         self._set_busy(False)
         if not isinstance(result, VpeMacroResult):
             self._close_loading()
@@ -301,7 +322,9 @@ class VpeMacroView(QWidget):
             self._on_apply_ok(result)
 
     def _on_worker_fail(self, message: str) -> None:
+        worker = self._worker
         self._worker = None
+        release_qthread(worker)
         self._set_busy(False)
         self._close_loading()
         self._pending_after_export = None
@@ -310,8 +333,7 @@ class VpeMacroView(QWidget):
         shown = " ".join((message or "").split())
         if len(shown) > 600:
             shown = shown[:600] + "…"
-        lines = [shown[i : i + 42] for i in range(0, len(shown), 42)] or [""]
-        QMessageBox.critical(self, "VPE Macro", "\n".join(lines))
+        QMessageBox.critical(self, "VPE Macro", _wrap_dialog_text(shown))
 
     def _run_job(self, job: VpeMacroJob, *, loading_title: str | None = None) -> None:
         self._stop_worker()
@@ -596,7 +618,7 @@ class VpeMacroView(QWidget):
         try:
             source = self._current_profile.full_path if self._current_profile else ""
             if self._load_dialog is not None:
-                self._load_dialog.close()
+                self._hold_widget(self._load_dialog)
                 self._load_dialog = None
             dialog = LoadMacroDialog(
                 snapshot=snapshot,
@@ -610,7 +632,6 @@ class VpeMacroView(QWidget):
                 parent=self.window(),
             )
             dialog.setModal(False)
-            dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
             dialog.load_requested.connect(self._on_load_requested)
             dialog.destroyed.connect(self._clear_load_dialog)
             self._load_dialog = dialog
@@ -639,6 +660,7 @@ class VpeMacroView(QWidget):
                 target_profile_path=request.target_profile_path,
                 target_macro_name=request.target_macro_name,
                 source_hostname=self._hostname,
+                include_customization=request.include_customization,
                 target_profile=request.target_profile,
             )
         )
@@ -656,9 +678,10 @@ class VpeMacroView(QWidget):
                 "저장된 Macro 파일이 없습니다. 먼저 Save Macro 하세요.",
             )
             return
+        if self._macro_picker is not None:
+            self._hold_widget(self._macro_picker)
         picker = SavedMacroPickDialog(files, self.window())
         picker.setModal(False)
-        picker.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         picker.file_chosen.connect(self._load_snapshot_path)
         picker.destroyed.connect(lambda _obj=None: setattr(self, "_macro_picker", None))
         self._macro_picker = picker

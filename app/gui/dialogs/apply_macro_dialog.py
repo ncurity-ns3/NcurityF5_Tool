@@ -9,17 +9,19 @@ from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLayout,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
+    QWidget,
 )
 
 from app.gui.dialogs.loading_progress_dialog import LoadingProgressDialog
@@ -27,7 +29,12 @@ from app.gui.form_controls import PortSpinBox, configure_port_spinbox, create_fo
 from app.gui.theme import mark_page_subtitle, mark_primary_button, mark_secondary_button
 from app.gui.widgets.ncurity_checkbox import NcurityCheckBox
 from app.gui.widgets.ncurity_radio import NcurityRadioButton
-from app.gui.workers.vpe_macro_worker import VpeMacroJob, VpeMacroResult, VpeMacroWorker
+from app.gui.workers.vpe_macro_worker import (
+    VpeMacroJob,
+    VpeMacroResult,
+    VpeMacroWorker,
+    release_qthread,
+)
 from app.modules.vpe_macro.apm_macro import (
     AccessProfileRef,
     ApplyPlan,
@@ -38,10 +45,6 @@ from app.modules.vpe_macro.apm_macro import (
 )
 
 _PROFILE_PLACEHOLDER = "Access Profile을 선택하세요"
-_SAME_DEVICE_NAME_RULE = (
-    "Macro는 장비 전역 객체입니다. 이름 목록을 먼저 조회해서 마지막 번호를 본 뒤, "
-    "auth_ad / _1 / _2 / _3이 있으면 _4를 만듭니다. 원본에는 연결하지 않습니다."
-)
 
 
 @dataclass
@@ -54,6 +57,7 @@ class LoadMacroRequest:
     username: str
     password: str
     other_device: bool
+    include_customization: bool = False
     target_profile: AccessProfileRef | None = None
 
 
@@ -104,7 +108,7 @@ class SavedMacroPickDialog(QDialog):
             QMessageBox.information(self, "Load Macro", "파일을 선택하세요.")
             return
         self.file_chosen.emit(self._path)
-        super().accept()
+        self.hide()
 
     def selected_path(self) -> str:
         return self._path
@@ -145,8 +149,8 @@ class LoadMacroDialog(QDialog):
         self._worker: VpeMacroWorker | None = None
         self._loading: LoadingProgressDialog | None = None
         self.setWindowTitle("Load Macro")
-        self.setMinimumSize(640, 740)
-        self.resize(640, 740)
+        self.setMinimumSize(640, 520)
+        self.resize(680, 620)
         self._build_ui()
         self.this_radio.blockSignals(True)
         self.other_radio.blockSignals(True)
@@ -157,11 +161,19 @@ class LoadMacroDialog(QDialog):
         self.this_radio.blockSignals(False)
         self.other_radio.blockSignals(False)
         self._on_mode_changed()
-        self.resize(640, 740)
+        self._fit_to_screen()
 
     def _build_ui(self) -> None:
-        root = QVBoxLayout(self)
-        root.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 12, 12, 12)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        body = QWidget()
+        root = QVBoxLayout(body)
+        root.setContentsMargins(0, 0, 0, 0)
         caption = self.snapshot.macro_caption or self.snapshot.macro_full_path
         lead = QLabel(
             f"저장한 Macro <b>{caption}</b>을(를) 대상 Access Profile에 Load합니다."
@@ -170,11 +182,6 @@ class LoadMacroDialog(QDialog):
         lead.setTextFormat(Qt.TextFormat.RichText)
         mark_page_subtitle(lead)
         root.addWidget(lead)
-
-        self.rule_label = QLabel(_SAME_DEVICE_NAME_RULE)
-        self.rule_label.setWordWrap(True)
-        self.rule_label.setProperty("role", "muted")
-        root.addWidget(self.rule_label)
 
         source = QLabel(
             f"원본: {self.snapshot.access_profile or self.snapshot.policy_name or '—'}  ·  "
@@ -230,7 +237,6 @@ class LoadMacroDialog(QDialog):
         self.profile_combo.setMinimumContentsLength(24)
         self.profile_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.macro_name_edit = QLineEdit(snapshot_display_name(self.snapshot))
-        self.macro_name_edit.setPlaceholderText("이미 있으면 마지막 번호 다음(_4)으로 만듭니다")
         self.macro_name_edit.setFixedHeight(36)
         self.macro_name_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
@@ -239,16 +245,21 @@ class LoadMacroDialog(QDialog):
         root.addLayout(form)
 
         self.preview = QListWidget()
-        self.preview.setMinimumHeight(120)
-        self.preview.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
-        root.addWidget(self.preview, stretch=1)
+        self.preview.setFixedHeight(96)
+        self.preview.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.preview.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.preview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        root.addWidget(self.preview)
 
         self.warn_label = QLabel()
         self.warn_label.setWordWrap(True)
         self.warn_label.setProperty("role", "muted")
         root.addWidget(self.warn_label)
+
+        self.customizing = NcurityCheckBox("Web Customizing Load")
+        self.customizing.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.customizing.setMinimumHeight(self.customizing.sizeHint().height())
+        root.addWidget(self.customizing)
 
         self.confirm = NcurityCheckBox(
             "이 작업이 장비 Access Policy를 변경하는 것에 동의합니다."
@@ -271,8 +282,10 @@ class LoadMacroDialog(QDialog):
             cancel.setMinimumHeight(40)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        root.addWidget(buttons)
         self._buttons = buttons
+        scroll.setWidget(body)
+        outer.addWidget(scroll, stretch=1)
+        outer.addWidget(buttons)
 
         self.this_radio.toggled.connect(self._on_mode_changed)
         self.other_radio.toggled.connect(self._on_mode_changed)
@@ -280,6 +293,7 @@ class LoadMacroDialog(QDialog):
         self.profile_combo.currentIndexChanged.connect(self._refresh_preview)
         self.macro_name_edit.textChanged.connect(self._refresh_preview)
         self.confirm.toggled.connect(self._refresh_enabled)
+        self.customizing.toggled.connect(self._refresh_preview)
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._stop_worker()
@@ -331,22 +345,18 @@ class LoadMacroDialog(QDialog):
     def _on_mode_changed(self) -> None:
         other = self.uses_other_device()
         self.other_box.setVisible(other)
-        self.rule_label.setVisible(not other)
         self._fill_profiles()
         self._refresh_preview()
-        self._restore_dialog_size()
 
-    def _restore_dialog_size(self) -> None:
-        layout = self.layout()
-        hint = layout.sizeHint() if layout is not None else None
-        hint_w = hint.width() if hint is not None else 640
-        hint_h = hint.height() if hint is not None else 740
-        self.setMinimumSize(max(640, hint_w), max(740, hint_h))
-        if self.width() < self.minimumWidth() or self.height() < self.minimumHeight():
-            self.resize(
-                max(self.width(), self.minimumWidth()),
-                max(self.height(), self.minimumHeight()),
-            )
+    def _fit_to_screen(self) -> None:
+        screen = self.screen()
+        if screen is None:
+            return
+        avail = screen.availableGeometry()
+        self.resize(
+            min(self.width(), max(640, avail.width() - 48)),
+            min(620, max(520, avail.height() - 80)),
+        )
 
     def _fill_profiles(self) -> None:
         profiles = self._active_profiles()
@@ -389,7 +399,9 @@ class LoadMacroDialog(QDialog):
         worker.start()
 
     def _on_other_login_ok(self, result: object) -> None:
+        worker = self._worker
         self._worker = None
+        release_qthread(worker)
         self.connect_btn.setEnabled(True)
         if not isinstance(result, VpeMacroResult):
             self._close_loading()
@@ -412,7 +424,9 @@ class LoadMacroDialog(QDialog):
         self.connect_status.setText(f"{text}  ({current}/{max(int(total), 1)})")
 
     def _on_other_login_fail(self, message: str) -> None:
+        worker = self._worker
         self._worker = None
+        release_qthread(worker)
         self.connect_btn.setEnabled(True)
         self._close_loading()
         self._other_connected = False
@@ -459,9 +473,7 @@ class LoadMacroDialog(QDialog):
                 signal.disconnect()
             except TypeError:
                 pass
-        if worker.isRunning():
-            worker.requestInterruption()
-            worker.wait(3000)
+        release_qthread(worker)
 
     def _refresh_preview(self) -> None:
         self.preview.clear()
@@ -471,13 +483,11 @@ class LoadMacroDialog(QDialog):
             self.warn_label.setText(_PROFILE_PLACEHOLDER)
             self._plan = None
             self._refresh_enabled()
-            self._restore_dialog_size()
             return
         if not name:
             self.warn_label.setText("Load할 Macro 이름을 입력하세요.")
             self._plan = None
             self._refresh_enabled()
-            self._restore_dialog_size()
             return
         try:
             plan = build_apply_plan(
@@ -490,7 +500,6 @@ class LoadMacroDialog(QDialog):
             self.warn_label.setText(str(exc))
             self._plan = None
             self._refresh_enabled()
-            self._restore_dialog_size()
             return
         self._plan = plan
         for agent_type, body in plan.agents:
@@ -500,17 +509,11 @@ class LoadMacroDialog(QDialog):
             kind = item.get("itemType") or "item"
             cap = item.get("caption") or item.get("name")
             QListWidgetItem(f"{kind}  {cap}", self.preview)
-        warns: list[str] = []
-        if self._same_name_on_this_device() and target is not None:
-            warns.append(
-                f"이름 {name} 계열이 있으면 목록에서 마지막 번호를 찾아 다음 번호로 만듭니다. "
-                "원본 Macro는 변경하지 않습니다."
-            )
-        if plan.warnings:
-            warns.extend(plan.warnings)
-        self.warn_label.setText("\n".join(warns) if warns else "")
+        custom_names = _customization_names(self.snapshot)
+        if custom_names:
+            self.preview.addItem("Web Customizing  " + ", ".join(custom_names))
+        self.warn_label.setText("")
         self._refresh_enabled()
-        self._restore_dialog_size()
 
     def _refresh_enabled(self) -> None:
         ok = self._buttons.button(QDialogButtonBox.StandardButton.Ok)
@@ -528,7 +531,11 @@ class LoadMacroDialog(QDialog):
 
     def accept(self) -> None:
         if self.uses_other_device() and not self._other_connected:
-            QMessageBox.information(self, "Load Macro", "다른 장비의 Access Profile을 먼저 조회하세요.")
+            QMessageBox.information(
+                self,
+                "Load Macro",
+                "다른 장비의 Access Profile을 먼저 조회하세요.",
+            )
             return
         if not self.selected_profile() or not self.target_macro_name():
             QMessageBox.information(self, "Load Macro", "Access Profile과 Macro 이름을 선택하세요.")
@@ -544,10 +551,26 @@ class LoadMacroDialog(QDialog):
                 username=username,
                 password=password,
                 other_device=self.uses_other_device(),
+                include_customization=self.customizing.isChecked(),
                 target_profile=self.selected_profile(),
             )
         )
-        super().accept()
+        self._stop_worker()
+        self._this_password = ""
+        self._other_password = ""
+        self.pass_edit.clear()
+        self.hide()
+
+
+def _customization_names(snapshot: MacroSnapshot) -> list[str]:
+    names: list[str] = []
+    for agent in snapshot.agents:
+        if not isinstance(agent, dict):
+            continue
+        for item in agent.get("customization_files") or []:
+            if isinstance(item, dict) and item.get("name"):
+                names.append(str(item["name"]))
+    return list(dict.fromkeys(names))
 
 
 # Older import path used by previous builds.

@@ -24,14 +24,26 @@ class RequestResult:
     output: str
 
 
-def classify_response(output: str, *, timed_out: bool, return_code: int) -> tuple[str, int | None]:
-    """Return (blocked|passed|failed, http status or None)."""
+def classify_response(
+    output: str,
+    *,
+    timed_out: bool,
+    return_code: int,
+    block_phrase: str = "",
+) -> tuple[str, int | None]:
+    """Return (blocked|passed|failed, http status or None).
+
+    block_phrase is matched against the whole response text: effective URL
+    (path and query), headers, and body.
+    """
     codes = [int(match) for match in _HTTP_CODE.findall(output or "")]
     http_code = codes[-1] if codes else None
     if timed_out or http_code is None:
         return "failed", http_code
     folded = (output or "").casefold()
-    if http_code in _BLOCK_CODES or any(marker in folded for marker in _BLOCK_MARKERS):
+    phrase = block_phrase.strip().casefold()
+    marked = bool(phrase) and phrase in folded
+    if http_code in _BLOCK_CODES or marked or any(marker in folded for marker in _BLOCK_MARKERS):
         return "blocked", http_code
     if return_code not in (0, None) and http_code == 0:
         return "failed", http_code

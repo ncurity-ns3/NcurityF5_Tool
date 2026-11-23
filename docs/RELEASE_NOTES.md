@@ -6,7 +6,7 @@
 - **2** — 기능 추가나 그에 준하는 변경
 - **3** — 버그 수정, 작은 개선, 로직 수정
 
-현재 버전은 1.3.1 입니다.
+현재 버전은 1.4.1 입니다.
 
 | 버전 | 릴리스 | 노트 |
 |------|--------|------|
@@ -15,3 +15,4 @@
 | 1.2.0 | VPE Viewer, 납품확인서 작성 | [1.2.0](release-notes/1.2.0.md) |
 | 1.3.0 | WAF, OWASP Top 10 PoC | [1.3.0](release-notes/1.3.0.md) |
 | 1.3.1 | OWASP 2017·2021 전체, VPE 매크로 접기 | [1.3.1](release-notes/1.3.1.md) |
+| 1.4.1 | N-Health Release Notes, SSL, Host Content, QKView | [1.4.1](release-notes/1.4.1.md) |

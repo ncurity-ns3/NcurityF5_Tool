@@ -150,7 +150,7 @@ def build_curl_argv(line: str, target: Target, curl_bin: str) -> tuple[str, list
         "-sS",
         "-i",
         "-w",
-        "\n[http %{http_code}]\n",
+        "\n[http %{http_code}]\n[url %{url_effective}]\n",
         *args[1:],
     ]
     return rewritten, argv

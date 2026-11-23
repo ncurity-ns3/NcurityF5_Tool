@@ -167,7 +167,7 @@ class OsUpgradeCheckView(QWidget):
             self.target_version_combo.setCurrentIndex(0)
         meta_form.addRow("목표 버전", self.target_version_combo)
         ver_hint = QLabel(
-            "Check List: 작업 전만 License/Service Check Date 비교 · 작업 후는 생략"
+            "작업 전과 작업 후 Check List는 같은 항목입니다. 나란히 비교하세요."
         )
         ver_hint.setWordWrap(True)
         ver_hint.setProperty("role", "muted")
@@ -686,7 +686,6 @@ class OsUpgradeCheckView(QWidget):
             html_path,
             typed,
             title="작업 후 Check List",
-            include_license_check=False,
         )
         self._mark_report_ready("post_checklist", html_path)
 

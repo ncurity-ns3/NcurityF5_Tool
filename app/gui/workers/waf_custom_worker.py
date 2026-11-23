@@ -35,6 +35,7 @@ class WafCustomWorker(QThread):
         login: LoginPlan | None,
         login_only: bool,
         carry_cookies: bool,
+        block_phrase: str = "",
     ) -> None:
         super().__init__()
         self.target = target
@@ -47,6 +48,7 @@ class WafCustomWorker(QThread):
         self.login = login
         self.login_only = login_only
         self.carry_cookies = carry_cookies
+        self.block_phrase = block_phrase
         self.runner = CurlRunner()
         self._last_cookies: list[tuple[str, str]] = []
 
@@ -98,7 +100,12 @@ class WafCustomWorker(QThread):
 
     def _send(self, call: PreparedCall, prefix: str) -> None:
         code, output, timed_out = self.runner.run_one(call.argv)
-        outcome, http_code = classify_response(output, timed_out=timed_out, return_code=code)
+        outcome, http_code = classify_response(
+            output,
+            timed_out=timed_out,
+            return_code=code,
+            block_phrase=self.block_phrase,
+        )
         labels = {"blocked": "차단", "passed": "통과", "failed": "실패"}
         shown = "-" if http_code is None else str(http_code)
         head = f"{prefix} {call.label}".strip()

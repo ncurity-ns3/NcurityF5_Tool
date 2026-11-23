@@ -5,6 +5,8 @@ Names of objects that must already exist — AAA server, customization group,
 webtop, resource, SMTP — are left out. Load creates those properties as none.
 A logon page cannot be created with an empty customization group on this TMOS,
 so Load creates a new group that belongs to the new macro only.
+Advanced files such as user-logon.css are stored with the snapshot and written
+only when Web Customizing Load is checked.
 """
 
 from __future__ import annotations
@@ -264,14 +266,21 @@ def _safe_name(name: str) -> str:
 
 
 def rename_macro_name(name: str, source: str, actual: str) -> str:
+    """Give the new macro its own object names. Never recreate the live source objects."""
     short = _short_name(name)
     if not short:
         return ""
     if short == source:
         return actual
-    prefix = f"{source}_"
-    if source and short.startswith(prefix):
-        return f"{actual}{short[len(source):]}"
+    if source:
+        for sep in ("_", "-"):
+            if short.startswith(f"{source}{sep}"):
+                renamed = f"{actual}{short[len(source):]}"
+                return renamed[:80]
+    head = f"{actual}_" if actual else ""
+    dash = f"{actual}-" if actual else ""
+    if actual and short != actual and not short.startswith(head) and not short.startswith(dash):
+        return f"{actual}_{short}"[:80]
     return short
 
 
@@ -358,6 +367,28 @@ def _run(runner: Any, command: str, *, timeout: float, max_bytes: int) -> str:
         return str(runner(command, timeout=timeout) or "")
 
 
+def _lookup_customization_group(runner: Any, agent_type: str, name: str) -> str:
+    """One property. The full agent dump can cut this line off."""
+    try:
+        agent_type = _safe_name(agent_type)
+        name = _safe_name(name)
+    except ValueError:
+        return ""
+    text = _run(
+        runner,
+        f"tmsh -q list apm policy agent {agent_type} {name} customization-group",
+        timeout=8.0,
+        max_bytes=4_096,
+    )
+    match = re.search(r"customization-group\s+(\S+)", text or "")
+    if match is None:
+        return ""
+    short = _short_name(match.group(1).strip().strip("{}"))
+    if not short or not _NAME_RE.fullmatch(short):
+        return ""
+    return short
+
+
 def _failed(text: str) -> bool:
     compact = " ".join((text or "").lower().split())
     if not compact:
@@ -376,6 +407,7 @@ def collect_macro_boxes(
     runner: Any,
     macro_path: str,
     *,
+    profile_name: str = "",
     progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """List one macro's items and agents. Does not list the parent Access Policy."""
@@ -477,13 +509,63 @@ def collect_macro_boxes(
             obj = parse_tmsh_object(chunk)
             if obj is None or obj.get("kind") != "agent":
                 continue
-            agents.append(agent_record(obj, partition=partition))
+            raw_body = _as_dict(obj.get("body"))
+            record = agent_record(obj, partition=partition)
+            group = raw_body.get("customization-group") or raw_body.get("customizationGroup")
+            if group and str(obj.get("agent_type") or "") in _PRIVATE_CG:
+                record["customization_group"] = str(group)
+            agents.append(record)
+    notes: list[str] = []
+    del profile_name
+    if agents:
+        for agent in agents:
+            if str(agent.get("type") or "") not in _PRIVATE_CG:
+                continue
+            if str(agent.get("customization_group") or "").strip():
+                continue
+            found = _lookup_customization_group(
+                runner,
+                str(agent.get("type") or ""),
+                str(agent.get("name") or ""),
+            )
+            if found:
+                agent["customization_group"] = found
+        from app.modules.vpe_macro.customization import (
+            attach_customization_files,
+            read_agent_filestore_files,
+        )
+
+        notes = attach_customization_files(runner, agents, progress=_progress)
+        for agent in agents:
+            if str(agent.get("type") or "") not in _PRIVATE_CG:
+                continue
+            label = _short_name(str(agent.get("name") or ""))
+            stored, detail = read_agent_filestore_files(
+                runner,
+                partition=partition,
+                agent=label,
+            )
+            if stored:
+                current = [
+                    item
+                    for item in (agent.get("customization_files") or [])
+                    if isinstance(item, dict)
+                ]
+                by_name = {str(item.get("name") or ""): item for item in current if item.get("name")}
+                for item in stored:
+                    by_name[str(item.get("name") or "")] = item
+                agent["customization_files"] = list(by_name.values())
+                names = ", ".join(str(item.get("name") or "") for item in stored[:4])
+                _progress(f"Web Customizing {len(stored)}개 저장… ({names})")
+            elif not agent.get("customization_files"):
+                _progress(detail)
     return {
         "items": items,
         "agents": agents,
         "start_item": start,
         "default_ending": default_ending,
         "caption": caption,
+        "customization_notes": notes,
     }
 
 
@@ -629,6 +711,27 @@ def _agent_lines(
     return lines
 
 
+def _rules_with_fallback(item_type: str, rules: list[Any]) -> list[dict[str, Any]]:
+    """Action items are rejected unless the last rule is caption fallback and has no expression.
+
+    F5 01071123. A GUI branch named Out still has an empty expression; tmsh only
+    accepts that branch when the caption is exactly fallback. The next item stays.
+    """
+    kept = [dict(rule) for rule in rules if isinstance(rule, dict)]
+    if item_type == "terminal-out" or not kept:
+        return kept
+    last = kept[-1]
+    expr = str(last.get("expression") or "").strip()
+    caption = str(last.get("caption") or "").strip().lower()
+    if item_type == "entry" or not expr or caption == "fallback":
+        last["caption"] = "fallback"
+        last["expression"] = ""
+        return kept
+    nxt = str(last.get("nextItem") or last.get("next-item") or "")
+    kept.append({"caption": "fallback", "expression": "", "nextItem": nxt})
+    return kept
+
+
 def _item_line(
     item: dict[str, Any],
     *,
@@ -660,7 +763,7 @@ def _item_line(
             props.append("agents add { " + " ".join(bits) + " }")
     if item_type != "terminal-out":
         rendered: list[str] = []
-        for rule in item.get("rules") or []:
+        for rule in _rules_with_fallback(item_type, list(item.get("rules") or [])):
             if not isinstance(rule, dict):
                 continue
             nxt = rename_macro_name(
@@ -687,7 +790,11 @@ def _item_line(
 def _owned_by_new_macro(name: str, actual: str) -> bool:
     """Only objects created for this load. Never the source macro's boxes."""
     short = _short_name(name)
-    return short == actual or short.startswith(f"{actual}_")
+    return (
+        short == actual
+        or short.startswith(f"{actual}_")
+        or short.startswith(f"{actual}-")
+    )
 
 
 def saved_macro_cleanup_command(

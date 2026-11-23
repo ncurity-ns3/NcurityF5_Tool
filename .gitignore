@@ -15,4 +15,5 @@ output/
 *.key
 .env
 jobs.db
+cookie.txt
 _extract_vpe/

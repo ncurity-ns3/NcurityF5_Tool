@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtCore import QEvent, QObject, QPoint, Qt
 from PyQt6.QtGui import QWheelEvent
-from PyQt6.QtWidgets import QComboBox, QLineEdit, QSizePolicy, QSpinBox, QWidget
+from PyQt6.QtWidgets import (
+    QAbstractScrollArea,
+    QApplication,
+    QComboBox,
+    QLineEdit,
+    QSizePolicy,
+    QSpinBox,
+    QWidget,
+)
 
 
 class PortSpinBox(QSpinBox):
@@ -22,8 +30,39 @@ def _repolish(widget: QWidget) -> None:
     widget.update()
 
 
+class ComboWheelFilter(QObject):
+    """Closed select boxes keep their value when the wheel moves."""
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        if event.type() != QEvent.Type.Wheel or not isinstance(watched, QComboBox):
+            return False
+        view = watched.view()
+        if view is not None and view.isVisible():
+            return False
+        parent = watched.parentWidget()
+        while parent is not None:
+            if isinstance(parent, QAbstractScrollArea):
+                bar = parent.verticalScrollBar()
+                steps = event.angleDelta().y() / 120
+                bar.setValue(int(bar.value() - steps * 48))
+                return True
+            parent = parent.parentWidget()
+        return True
+
+
+def install_combo_wheel_filter(parent: QObject) -> ComboWheelFilter:
+    guard = ComboWheelFilter(parent)
+    app = QApplication.instance()
+    if app is not None:
+        app.installEventFilter(guard)
+    return guard
+
+
 class FormComboBox(QComboBox):
     """Form combo — rounded ChoicePickerPopup instead of square OS list."""
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
+        event.ignore()
 
     def showPopup(self) -> None:  # noqa: N802
         if self.property("formControl") != "formCombo" or self.count() == 0:
@@ -90,7 +129,9 @@ def configure_port_spinbox(spin: QSpinBox) -> None:
     spin.setProperty("formControl", "portSpin")
     spin.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
     spin.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-    spin.setFixedHeight(30)
+    spin.setFixedHeight(36)
+    spin.setMinimumWidth(140)
+    spin.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     spin.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
     _repolish(spin)
 
