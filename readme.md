@@ -21,7 +21,7 @@ offline windows automation platform for f5 field engineers (phase 1 poc).
 | 1.2.0 | VPE Viewer, 납품확인서 작성, 메뉴 정리 | GitHub Releases `NcurityF5Tool-1.2.0.msi` |
 | 1.3.0 | WAF, OWASP Top 10 PoC (2021 목록) | GitHub Releases `NcurityF5Tool-1.3.0.msi` |
 | 1.3.1 | OWASP 2017·2021 전체 목록, VPE 매크로 접기 | GitHub Releases `NcurityF5Tool-1.3.1.msi` |
-| 1.4.1 | N-Health Release Notes, SSL 인증서, Host Content, QKView 점검 | GitHub Releases `NcurityF5Tool-1.4.1.msi` |
+| 1.4.1 | VPE, QKView 점검, SSL, Host Content, Release Notes Checker | GitHub Releases `NcurityF5Tool-1.4.1.msi` |
 
 자세한 변경 내용은 [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md)에 있습니다.
 

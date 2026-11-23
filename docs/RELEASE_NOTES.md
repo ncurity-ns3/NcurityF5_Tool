@@ -15,4 +15,4 @@
 | 1.2.0 | VPE Viewer, 납품확인서 작성 | [1.2.0](release-notes/1.2.0.md) |
 | 1.3.0 | WAF, OWASP Top 10 PoC | [1.3.0](release-notes/1.3.0.md) |
 | 1.3.1 | OWASP 2017·2021 전체, VPE 매크로 접기 | [1.3.1](release-notes/1.3.1.md) |
-| 1.4.1 | N-Health Release Notes, SSL, Host Content, QKView | [1.4.1](release-notes/1.4.1.md) |
+| 1.4.1 | VPE, QKView 점검, SSL, Host Content, Release Notes Checker | [1.4.1](release-notes/1.4.1.md) |
