@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import SecretStr
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QCursor
 from PyQt6.QtWidgets import (
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -23,9 +23,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from pydantic import SecretStr
-
 from app.core.models import ConnectionProfile, DeviceTarget, PlatformKind
+from app.gui.connection_draft import ConnectionDraft, ConnectionForm
 from app.gui.connection_test import (
     ConnectionTestOutcome,
     ConnectionTestPlan,
@@ -34,8 +33,8 @@ from app.gui.connection_test import (
 )
 from app.gui.device_list_store import DeviceListStore
 from app.gui.device_models import MODEL_ISERIES, MODEL_RSERIES, normalize_device_model
-from app.gui.form_controls import PortSpinBox, configure_port_spinbox, create_form_combobox
 from app.gui.device_profile_store import DeviceProfileStore
+from app.gui.form_controls import PortSpinBox, configure_port_spinbox, create_form_combobox
 from app.gui.session_manager import SessionManager
 from app.gui.theme import mark_primary_button
 from app.gui.widgets.multi_device_entry import DeviceRowData
@@ -69,6 +68,8 @@ class DeviceConnectionPanel(QWidget):
         if tmos_only:
             self._apply_tmos_only_mode()
         self._reload_saved_sessions()
+        ConnectionDraft.instance().changed.connect(self._apply_shared_form)
+        self._apply_shared_form()
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._stop_test_worker()
@@ -576,6 +577,8 @@ class DeviceConnectionPanel(QWidget):
         if isinstance(outcome, ConnectionTestOutcome):
             ok = outcome.ok_all
             self._register_sessions(outcome)
+            if outcome.ok_all:
+                self.publish_connected_form()
             self._set_connection_status(outcome.ok_all, outcome.summary)
             self._refresh_session_label()
             title = "Test Connection — Success" if outcome.ok_all else "Test Connection — Failed"
@@ -590,6 +593,59 @@ class DeviceConnectionPanel(QWidget):
         self.session_label.setText("연결 상태: 세션 삭제됨")
         self.status_message.emit("Disconnected")
         self.disconnected.emit()
+
+    def publish_connected_form(self) -> None:
+        """Remember this form so other menus can reuse the same device."""
+        if self.single_radio.isChecked():
+            form = ConnectionForm(
+                platform=self.single_platform_combo.currentText(),
+                label=self.label_edit.text(),
+                host=self.host_edit.text().strip(),
+                port=int(self.port_spin.value()),
+                f5os_host=self.f5os_host_edit.text().strip(),
+                f5os_port=int(self.f5os_port_spin.value()),
+                username=self.user_edit.text(),
+                password=self.pass_edit.text(),
+                f5os_username=self.f5os_user_edit.text(),
+                f5os_password=self.f5os_pass_edit.text(),
+                source=id(self),
+            )
+        else:
+            rows = self.device_table.snapshot()
+            if not rows:
+                return
+            row = rows[0]
+            form = ConnectionForm(
+                platform=row.model,
+                label=row.label,
+                host=row.tmos_host.strip(),
+                port=int(row.tmos_port or 443),
+                f5os_host=(row.f5os_host or "").strip(),
+                f5os_port=int(row.f5os_port or 443),
+                username=row.tmos_user or self.user_edit.text(),
+                password=row.tmos_pass or self.pass_edit.text(),
+                f5os_username=row.f5os_user or self.f5os_user_edit.text(),
+                f5os_password=row.f5os_pass or self.f5os_pass_edit.text(),
+                source=id(self),
+            )
+        ConnectionDraft.instance().publish(form)
+
+    def _apply_shared_form(self) -> None:
+        form = ConnectionDraft.instance().form
+        if not form.active or form.source == id(self) or self.host_edit.text().strip():
+            return
+        self.single_radio.setChecked(True)
+        if form.platform:
+            self.single_platform_combo.setCurrentText(form.platform)
+        self.label_edit.setText(form.label)
+        self.host_edit.setText(form.host)
+        self.port_spin.setValue(int(form.port or 443))
+        self.f5os_host_edit.setText(form.f5os_host)
+        self.f5os_port_spin.setValue(int(form.f5os_port or 443))
+        self.user_edit.setText(form.username)
+        self.pass_edit.setText(form.password)
+        self.f5os_user_edit.setText(form.f5os_username)
+        self.f5os_pass_edit.setText(form.f5os_password)
 
     def tmos_credentials(self) -> tuple[str, int, str, str]:
         """(host, port, username, password) for the Single TMOS form."""

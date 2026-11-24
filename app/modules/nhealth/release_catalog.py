@@ -311,10 +311,18 @@ def load_release_notes(
     version: str,
     cache_dir: Path,
     on_percent: Callable[[int], None] | None = None,
+    *,
+    prefer_cache: bool = False,
 ) -> ReleaseNotes:
     exact = parse_version_text(version)
     url = supplement_url(exact)
     cache = cache_dir / f"{exact}.html"
+    if prefer_cache and cache.is_file():
+        cached = cache.read_text(encoding="utf-8", errors="replace")
+        if "ID Number" in cached and "404 Page not found" not in cached[:8192]:
+            if on_percent is not None:
+                on_percent(100)
+            return parse_release_html(cached, version=exact, url=url, source="cache")
     try:
         text = _download_notes(url, on_percent)
         if "ID Number" not in text:

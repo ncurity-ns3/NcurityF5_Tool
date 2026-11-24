@@ -43,6 +43,8 @@ class BugCheck:
     description: str = ""
     section: str = ""
     fixed_versions: str = ""
+    module: str = ""
+    severity: str = ""
 
 
 @dataclass(frozen=True)
@@ -180,6 +182,8 @@ def check_watched_bugs(notes: ReleaseNotes, bugs: list[WatchedBug]) -> list[BugC
                     item.description,
                     item.section,
                     item.fixed_versions,
+                    item.module,
+                    item.severity,
                 )
             )
         elif known:
@@ -194,6 +198,8 @@ def check_watched_bugs(notes: ReleaseNotes, bugs: list[WatchedBug]) -> list[BugC
                     item.description,
                     item.section,
                     item.fixed_versions,
+                    item.module,
+                    item.severity,
                 )
             )
         else:

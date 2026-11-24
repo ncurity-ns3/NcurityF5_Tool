@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QSettings, Qt
+from PyQt6.QtCore import QPointF, QSettings, Qt
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QPolygonF
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -27,7 +28,8 @@ from app.gui.branding import (
 )
 from app.gui.form_controls import apply_form_control_policies
 from app.gui.session_manager import SessionManager
-from app.gui.theme import polish_widget_scrollbars
+from app.gui.theme import BRAND_PRIMARY, TEXT_MUTED, polish_widget_scrollbars
+from app.gui.views.cve_checker_view import CveCheckerView
 from app.gui.views.delivery_form_view import DeliveryFormView
 from app.gui.views.health_check_view import HealthCheckView
 from app.gui.views.home_view import HomeView
@@ -36,6 +38,7 @@ from app.gui.views.os_upgrade_check_view import OsUpgradeCheckView
 from app.gui.views.placeholder_view import PlaceholderView
 from app.gui.views.release_notes_view import ReleaseNotesCheckerView
 from app.gui.views.ssl_cert_view import SslCertView
+from app.gui.views.troubleshooting_view import TroubleshootingView
 from app.gui.views.vpe_macro_view import VpeMacroView
 from app.gui.views.vpe_viewer_view import VpeViewerView
 from app.gui.views.waf_custom_view import WafCustomView
@@ -46,6 +49,23 @@ from app.gui.widgets.panel_toggle import PanelToggle
 _NAV_EXPANDED = 268
 _NAV_COLLAPSED = 40
 _NAV_SETTINGS_KEY = "ui/navCollapsed"
+_SECTION_ROLE = Qt.ItemDataRole.UserRole + 1
+_HEADER_ROLE = Qt.ItemDataRole.UserRole + 2
+
+
+def _chevron_icon(opened: bool, color: str) -> QIcon:
+    pix = QPixmap(16, 16)
+    pix.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pix)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(QPen(QColor(color), 1.8))
+    if opened:
+        points = (QPointF(4, 6), QPointF(8, 11), QPointF(12, 6))
+    else:
+        points = (QPointF(6, 4), QPointF(11, 8), QPointF(6, 12))
+    painter.drawPolyline(QPolygonF(points))
+    painter.end()
+    return QIcon(pix)
 
 
 class MainWindow(QMainWindow):
@@ -64,6 +84,13 @@ class MainWindow(QMainWindow):
         layout.setSpacing(0)
 
         self._nav_collapsed = False
+        self._page_index = 0
+        self._expanded_section: str | None = "Home"
+        self._chevron_icons = {
+            ("open", "brand"): _chevron_icon(True, BRAND_PRIMARY),
+            ("shut", "brand"): _chevron_icon(False, BRAND_PRIMARY),
+            ("shut", "muted"): _chevron_icon(False, TEXT_MUTED),
+        }
         nav_frame = QFrame()
         self._nav_frame = nav_frame
         nav_frame.setObjectName("navFrame")
@@ -109,18 +136,18 @@ class MainWindow(QMainWindow):
                     ("정기 점검", 1),
                     ("OS 업그레이드 간 점검", 2),
                     ("SSL 인증서 확인", 3),
-                    ("납품확인서 작성", 4),
+                    ("트러블슈팅 자료 수집", 4),
+                    ("납품확인서 작성", 5),
                 ],
             ),
-            ("APM", [("VPE Viewer", 5), ("VPE Macro Copy", 6), ("Host Content 추출", 7)]),
-            ("WAF", [("OWASP Top 10 취약점 공격", 8), ("Custom 공격 구문", 9)]),
+            ("APM", [("VPE Viewer", 6), ("VPE Macro Copy", 7), ("Host Content 추출", 8)]),
+            ("WAF", [("OWASP Top 10 취약점 공격", 9), ("Custom 공격 구문", 10)]),
             (
                 "N-Health",
                 [
-                    ("Release Notes Checker", 10),
-                    ("CVE Vulnerability Checker", 11),
-                    ("Config Viewer", 12),
-                    ("이슈 분석자료 수집", 13),
+                    ("Release Notes Checker", 11),
+                    ("CVE Vulnerability Checker", 12),
+                    ("Config Viewer", 13),
                     ("Log Search", 14),
                 ],
             ),
@@ -129,15 +156,24 @@ class MainWindow(QMainWindow):
             ("Settings", [("Settings", 17)]),
         ]
         for title, pages in sections:
+            direct = len(pages) == 1
             header = QListWidgetItem(title)
-            header.setFlags(Qt.ItemFlag.NoItemFlags)
-            header.setData(Qt.ItemDataRole.UserRole, None)
+            header.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            header.setData(_SECTION_ROLE, title)
+            header.setData(_HEADER_ROLE, True)
+            header.setData(Qt.ItemDataRole.UserRole, pages[0][1] if direct else None)
+            font = header.font()
+            font.setBold(True)
+            header.setFont(font)
             self.nav.addItem(header)
+            if direct:
+                continue
             for label, index in pages:
                 item = QListWidgetItem("  " + label)
                 item.setData(Qt.ItemDataRole.UserRole, index)
+                item.setData(_SECTION_ROLE, title)
                 self.nav.addItem(item)
-        self._select_page(0)
+        self._apply_sections()
         nav_layout.addWidget(self.nav, stretch=1)
         self.set_nav_collapsed(self._stored_nav_collapsed(), persist=False)
 
@@ -154,6 +190,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(HealthCheckView(project_root))
         self.stack.addWidget(OsUpgradeCheckView(project_root))
         self.stack.addWidget(SslCertView())
+        self.stack.addWidget(TroubleshootingView(project_root))
         self.stack.addWidget(DeliveryFormView())
         self.stack.addWidget(VpeViewerView())
         self.stack.addWidget(VpeMacroView(project_root))
@@ -161,22 +198,11 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(WafView())
         self.stack.addWidget(WafCustomView())
         self.stack.addWidget(ReleaseNotesCheckerView())
-        self.stack.addWidget(
-            PlaceholderView(
-                "CVE Vulnerability Checker",
-                "장비 버전의 CVE를 확인하는 화면입니다.",
-            )
-        )
+        self.stack.addWidget(CveCheckerView())
         self.stack.addWidget(
             PlaceholderView(
                 "Config Viewer",
                 "UCS 또는 QKView에서 설정 정보를 보는 화면입니다.",
-            )
-        )
-        self.stack.addWidget(
-            PlaceholderView(
-                "이슈 분석자료 수집",
-                "이슈 분석에 필요한 QKView, 로그 tarball, Core 파일을 모으는 화면입니다.",
             )
         )
         self.stack.addWidget(
@@ -201,6 +227,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(content_host, stretch=1)
 
         self.nav.currentRowChanged.connect(self._on_nav)
+        self.nav.itemClicked.connect(self._on_nav_clicked)
         apply_form_control_policies(self)
         polish_widget_scrollbars(self)
 
@@ -241,14 +268,59 @@ class MainWindow(QMainWindow):
         index = item.data(Qt.ItemDataRole.UserRole)
         if index is None:
             return
-        self.stack.setCurrentIndex(int(index))
+        self._page_index = int(index)
+        self.stack.setCurrentIndex(self._page_index)
 
-    def _select_page(self, page_index: int) -> None:
+    def _on_nav_clicked(self, item: QListWidgetItem) -> None:
+        if not item.data(_HEADER_ROLE):
+            return
+        section = str(item.data(_SECTION_ROLE) or "")
+        page = item.data(Qt.ItemDataRole.UserRole)
+        if page is not None:
+            self._page_index = int(page)
+            self._expanded_section = section
+            self.stack.setCurrentIndex(self._page_index)
+            self._apply_sections()
+            return
+        self._expanded_section = None if self._expanded_section == section else section
+        self._apply_sections()
+
+    def _apply_sections(self) -> None:
+        page_section = ""
+        active_row = 0
         for row in range(self.nav.count()):
             item = self.nav.item(row)
-            if item.data(Qt.ItemDataRole.UserRole) == page_index:
-                self.nav.setCurrentRow(row)
-                return
+            if item.data(Qt.ItemDataRole.UserRole) == self._page_index:
+                active_row = row
+                page_section = str(item.data(_SECTION_ROLE) or "")
+        self.nav.blockSignals(True)
+        for row in range(self.nav.count()):
+            item = self.nav.item(row)
+            section = str(item.data(_SECTION_ROLE) or "")
+            if item.data(_HEADER_ROLE):
+                opened = self._expanded_section == section
+                tone = "brand" if opened or section == page_section else "muted"
+                kind = "open" if opened else "shut"
+                item.setIcon(self._chevron_icons[(kind, tone)])
+                item.setToolTip("접기" if opened else "펼치기")
+                continue
+            if section:
+                item.setHidden(self._expanded_section != section)
+        if page_section and self.nav.item(active_row).isHidden():
+            header = self._header_row(page_section)
+            if header is not None:
+                active_row = header
+        self.nav.setCurrentRow(active_row)
+        self.nav.blockSignals(False)
+
+    def _header_row(self, section: str) -> int | None:
+        if not section:
+            return None
+        for row in range(self.nav.count()):
+            item = self.nav.item(row)
+            if item.data(_HEADER_ROLE) and item.data(_SECTION_ROLE) == section:
+                return row
+        return None
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
@@ -264,6 +336,8 @@ class MainWindow(QMainWindow):
         for view in self.findChildren(WafView):
             view.shutdown()
         for view in self.findChildren(WafCustomView):
+            view.shutdown()
+        for view in self.findChildren(TroubleshootingView):
             view.shutdown()
         SessionManager.instance().clear_all()
         super().closeEvent(event)

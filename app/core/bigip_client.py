@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -198,6 +200,7 @@ def _curl_outside_gui(
     out_path: str,
     body_path: str,
     max_bytes: int | None,
+    retain_output: bool = False,
 ) -> tuple[int, bytes]:
     """Start curl.exe with no console, parented by WMI, not by this GUI."""
     line_path = body_path + ".line"
@@ -272,7 +275,10 @@ def _curl_outside_gui(
             starter.wait(timeout=2)
         except subprocess.TimeoutExpired:
             pass
-        for path in (line_path, ps1_path, pid_path, done_path, body_path, out_path):
+        paths = [line_path, ps1_path, pid_path, done_path, body_path]
+        if not retain_output:
+            paths.append(out_path)
+        for path in paths:
             try:
                 os.remove(path)
             except OSError:
@@ -497,6 +503,294 @@ def extract_bash_command_result(raw: bytes) -> str:
             break
         out.append(char)
     return "".join(out).strip()
+
+
+_DOWNLOAD_NAME = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
+_F5_CHUNK = 512 * 1024
+
+
+def _header_status(text: str) -> int:
+    status = 0
+    for line in (text or "").splitlines():
+        if not line.startswith("HTTP/"):
+            continue
+        parts = line.split()
+        if len(parts) >= 2 and parts[1].isdigit():
+            status = int(parts[1])
+    return status
+
+
+def _header_span(text: str) -> tuple[int, int]:
+    """Last Content-Range as (start, total). Missing start is -1."""
+    start = -1
+    total = 0
+    for line in (text or "").splitlines():
+        if not line.lower().startswith("content-range:"):
+            continue
+        tail = line.split(":", 1)[1].strip()
+        if tail.lower().startswith("bytes"):
+            tail = tail[5:].strip()
+        left, _, size = tail.partition("/")
+        if size.strip().isdigit():
+            total = int(size.strip())
+        begin = left.split("-", 1)[0].strip()
+        if begin.isdigit():
+            start = int(begin)
+    return start, total
+
+
+def _header_total(text: str) -> int:
+    return _header_span(text)[1]
+
+
+def _body_note(body: bytes) -> str:
+    raw = (body or b"").decode("utf-8", errors="replace").strip()
+    if not raw or raw.startswith("\x00"):
+        return ""
+    note = raw
+    if raw.startswith("{"):
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            note = str(parsed.get("message") or parsed.get("error") or "")
+    return " ".join(note.split())[:120]
+
+
+def _download_failure(status: int, body: bytes = b"") -> str:
+    if status == 404:
+        base = "장비에서 파일을 찾지 못했습니다."
+    elif status in (401, 403):
+        base = "장비 인증이 거절되었습니다."
+    elif status:
+        base = f"파일 다운로드에 실패했습니다. (HTTP {status})"
+    else:
+        base = "파일 다운로드에 실패했습니다."
+    note = _body_note(body)
+    if note:
+        return f"{base} {note}"
+    return base
+
+
+def curl_download(
+    url: str,
+    dest: Path,
+    *,
+    token: str,
+    timeout: float,
+    insecure: bool = True,
+    basic: tuple[str, str] | None = None,
+) -> None:
+    """GET one file from the device URL. curl is not killed from this process."""
+    target = Path(dest)
+    curl = _find_curl()
+    if not curl:
+        raise RuntimeError("curl를 찾을 수 없어 파일을 받지 않습니다.")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    cap = timeout if timeout and timeout > 0 else 60.0
+    cmd = [
+        curl,
+        "-sS",
+        "-f",
+        "-o",
+        str(target),
+        "--max-time",
+        str(max(1, int(cap))),
+    ]
+    if insecure:
+        cmd.append("-k")
+    if basic:
+        cmd.extend(["-u", f"{basic[0]}:{basic[1]}"])
+    elif token:
+        cmd.extend(["-H", f"X-F5-Auth-Token: {token}"])
+    cmd.append(url)
+    handle, body_path = tempfile.mkstemp(prefix="ncurity_get_", suffix=".txt")
+    os.close(handle)
+    code = 1
+    try:
+        if os.name == "nt":
+            code, _raw = _curl_outside_gui(
+                cmd,
+                timeout=cap,
+                out_path=str(target),
+                body_path=body_path,
+                max_bytes=1,
+                retain_output=True,
+            )
+        else:
+            proc = _popen_detached(cmd)
+            try:
+                proc.wait(timeout=cap + 3.0)
+            except subprocess.TimeoutExpired as exc:
+                raise TimeoutError("다운로드 시간이 초과되었습니다.") from exc
+            code = int(proc.returncode or 0)
+    finally:
+        try:
+            os.remove(body_path)
+        except OSError:
+            pass
+    if code not in (0, None) or not target.is_file() or target.stat().st_size <= 0:
+        try:
+            target.unlink()
+        except OSError:
+            pass
+        raise RuntimeError("파일 다운로드에 실패했습니다.")
+
+
+def _fetch_download_range(
+    url: str,
+    range_value: str,
+    *,
+    token: str,
+    timeout: float,
+    insecure: bool,
+    basic: tuple[str, str] | None,
+) -> tuple[int, bytes, int, int]:
+    """One F5 file-transfer chunk. The helper may delete its own temp file."""
+    curl = _find_curl()
+    if not curl:
+        raise RuntimeError("curl를 찾을 수 없어 파일을 받지 않습니다.")
+    handle, body_path = tempfile.mkstemp(prefix="ncurity_rng_")
+    os.close(handle)
+    out_path = body_path + ".bin"
+    header_path = body_path + ".hdr"
+    cap = timeout if timeout and timeout > 0 else 120.0
+    cmd = [
+        curl,
+        "-sS",
+        "-o",
+        out_path,
+        "-D",
+        header_path,
+        "--max-time",
+        str(max(1, int(cap))),
+        "-H",
+        f"Content-Range: {range_value}",
+    ]
+    if insecure:
+        cmd.append("-k")
+    if basic:
+        cmd.extend(["-u", f"{basic[0]}:{basic[1]}"])
+    elif token:
+        cmd.extend(["-H", f"X-F5-Auth-Token: {token}"])
+    cmd.append(url)
+    try:
+        if os.name == "nt":
+            code, raw = _curl_outside_gui(
+                cmd,
+                timeout=cap,
+                out_path=out_path,
+                body_path=body_path,
+                max_bytes=_F5_CHUNK,
+            )
+        else:
+            proc = _popen_detached(cmd)
+            try:
+                proc.wait(timeout=cap + 3.0)
+            except subprocess.TimeoutExpired as exc:
+                raise TimeoutError("다운로드 시간이 초과되었습니다.") from exc
+            code = int(proc.returncode or 0)
+            try:
+                raw = Path(out_path).read_bytes()[:_F5_CHUNK]
+            except OSError:
+                raw = b""
+        header = ""
+        try:
+            with open(header_path, encoding="ascii", errors="replace") as stream:
+                header = stream.read()
+        except OSError:
+            header = ""
+        status = _header_status(header)
+        if code not in (0, None) and status == 0 and not raw:
+            raise RuntimeError(f"파일 다운로드에 실패했습니다. (curl {code})")
+        range_start, total = _header_span(header)
+        return status, raw, total, range_start
+    finally:
+        for path in (body_path, out_path, header_path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+
+def curl_download_ranged(
+    url: str,
+    dest: Path,
+    *,
+    token: str,
+    timeout: float,
+    insecure: bool = True,
+    basic: tuple[str, str] | None = None,
+    total_size: int = 0,
+) -> None:
+    """Download via F5 file-transfer in 512KB Content-Range chunks."""
+    target = Path(dest)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.time() + (timeout if timeout and timeout > 0 else 1800.0)
+    known = total_size if total_size > 0 else 0
+    start = 0
+    total = 0
+    written = 0
+    try:
+        with target.open("wb") as stream:
+            while True:
+                remaining = deadline - time.time()
+                if remaining < 1:
+                    raise TimeoutError("다운로드 시간이 초과되었습니다.")
+                limit = total or known
+                end = start + _F5_CHUNK - 1
+                if limit and end >= limit:
+                    end = limit - 1
+                if end < start:
+                    break
+                # The first request must use the chunk length, not the whole file size.
+                span = _F5_CHUNK if start == 0 else (total or known or _F5_CHUNK)
+                status, data, found, range_start = _fetch_download_range(
+                    url,
+                    f"{start}-{end}/{span}",
+                    token=token,
+                    timeout=min(180.0, remaining),
+                    insecure=insecure,
+                    basic=basic,
+                )
+                if status not in (0, 200, 206):
+                    raise RuntimeError(_download_failure(status, data))
+                if data.lstrip().startswith((b"<html", b"<!DOCTYPE", b"<!doctype")):
+                    raise RuntimeError("장비 응답이 파일이 아닙니다.")
+                if range_start >= 0 and range_start != start:
+                    raise RuntimeError(
+                        f"받은 구간이 어긋났습니다. 요청 {start}, 응답 {range_start}."
+                    )
+                if not data:
+                    break
+                if found > _F5_CHUNK:
+                    total = found
+                elif known > _F5_CHUNK:
+                    total = known
+                elif found > 0:
+                    total = found
+                expected = end - start + 1
+                if total and written + len(data) < total and len(data) != expected:
+                    raise RuntimeError(f"받은 조각 크기가 다릅니다. ({len(data)}/{expected})")
+                stream.write(data)
+                written += len(data)
+                if total and written >= total:
+                    break
+                start = written
+                if start > 8 * 1024 * 1024 * 1024:
+                    raise RuntimeError("파일이 너무 커서 중단했습니다.")
+        if written <= 0:
+            raise RuntimeError("받은 파일이 비어 있습니다.")
+        expect = total or known
+        if expect and written != expect:
+            raise RuntimeError(f"받은 크기가 장비 파일과 다릅니다. ({written}/{expect})")
+    except Exception:
+        try:
+            target.unlink()
+        except OSError:
+            pass
+        raise
 
 
 class BigipClient:
@@ -926,3 +1220,46 @@ class BigipClient:
         if text.lower().startswith("error") or "0107" in text[:20]:
             raise RuntimeError(f"bash rejected: {text[:200]}")
         return text
+
+    def download_var_tmp_file(
+        self,
+        name: str,
+        dest: Path,
+        *,
+        timeout: float = 1800.0,
+        endpoint: str = "qkview-downloads",
+        total_size: int = 0,
+    ) -> None:
+        """Download from the worker that can read this file's directory."""
+        workers = {
+            "qkview-autodeploy": "/cm/autodeploy/qkview-downloads/",
+            "qkview-downloads": "/shared/file-transfer/qkview-downloads/",
+            "image-downloads": "/cm/autodeploy/software-image-downloads/",
+            "ucs-downloads": "/shared/file-transfer/ucs-downloads/",
+        }
+        worker = workers.get(endpoint)
+        if worker is None or not _DOWNLOAD_NAME.fullmatch(name or ""):
+            raise RuntimeError("받을 파일 이름이 올바르지 않습니다.")
+        if not self._token:
+            self.authenticate()
+        handle, temp_name = tempfile.mkstemp(prefix="ncurity_dl_")
+        os.close(handle)
+        temp = Path(temp_name)
+        try:
+            curl_download_ranged(
+                f"{self._base_url()}{worker}{name}",
+                temp,
+                token=str(self._token or ""),
+                timeout=timeout,
+                insecure=not bool(self.profile.target.verify_tls),
+                basic=self._http_auth(),
+                total_size=total_size,
+            )
+            target = Path(dest)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                target.unlink()
+            shutil.move(str(temp), str(target))
+        finally:
+            if temp.exists():
+                temp.unlink()

@@ -10,9 +10,11 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
 from app.gui.views.release_notes_view import ReleaseNotesCheckerView
+from app.gui.widgets.report_window import ReportWindow
 from app.modules.nhealth.config_profile import (
     applies_to_config,
     profile_from_texts,
@@ -37,6 +39,7 @@ from app.modules.nhealth.release_notes import (
     save_bug_lists,
     upsert_named_bug,
 )
+from app.modules.nhealth.release_report import write_bug_report
 
 _app = QApplication.instance() or QApplication([])
 
@@ -285,6 +288,44 @@ def test_advanced_drops_a_feature_the_config_does_not_have(tmp_path: Path) -> No
     assert "data-module='APM'" in html
     assert "SAML assertion" not in html
     assert "mcpd restart" in html
+
+
+def test_bug_report_has_the_issue_filters(tmp_path: Path) -> None:
+    notes = _notes()
+    checks = check_watched_bugs(
+        notes,
+        [
+            WatchedBug("701341", "mcpd"),
+            WatchedBug("2355421", "azure"),
+            WatchedBug("999999", "없는 버그"),
+        ],
+    )
+    assert checks[0].module == "TMOS"
+    assert checks[1].module == "LTM"
+    path = tmp_path / "bugs.html"
+    write_bug_report(path, notes, checks, "고객A")
+    html = path.read_text(encoding="utf-8")
+    assert "id='mod'" in html
+    assert "id='kind'" in html
+    assert "id='sev-filters'" in html
+    assert "<option value='TMOS'>TMOS</option>" in html
+    assert "<option value='LTM'>LTM</option>" in html
+    assert "<option value='fixed'>Fixed</option>" in html
+    assert "<option value='known'>Known</option>" in html
+    assert "<option value='missing'>미포함</option>" in html
+    assert "data-module='TMOS'" in html
+    assert "data-kind='fixed'" in html
+    assert "value='none'" in html
+
+
+def test_report_window_allows_maximize(tmp_path: Path) -> None:
+    page = tmp_path / "report.html"
+    page.write_text("<html><body>report</body></html>", encoding="utf-8")
+    window = ReportWindow(page)
+    flags = window.windowFlags()
+    assert flags & Qt.WindowType.WindowMaximizeButtonHint
+    assert flags & Qt.WindowType.WindowMinimizeButtonHint
+    window.close()
 
 
 def test_bug_page_severity_meta() -> None:

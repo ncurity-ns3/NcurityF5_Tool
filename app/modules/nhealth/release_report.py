@@ -80,11 +80,14 @@ def write_bug_report(
 ) -> None:
     rows = []
     for check in checks:
+        kind, _label = _verdict_filter(check.verdict)
+        module = check.module or "none"
+        severity = _severity_token(check.severity) or "none"
         rows.append(
-            "<tr>"
+            f"<tr data-module='{escape(module)}' data-kind='{kind}' data-severity='{severity}'>"
             f"<td>{escape(check.bug_id)}</td>"
             f"<td>{escape(check.title)}</td>"
-            f"<td class='{ _verdict_class(check.verdict) }'>{escape(check.verdict)}</td>"
+            f"<td class='{_verdict_class(check.verdict)}'>{escape(check.verdict)}</td>"
             f"<td>{escape(check.state)}</td>"
             f"<td>{escape(check.section)}</td>"
             f"<td>{escape(check.fixed_versions)}</td>"
@@ -100,6 +103,7 @@ def write_bug_report(
         notes,
         f"버그 목록 · {escape(list_name)}",
         body or "<p>표시할 버그가 없습니다.</p>",
+        _bug_filters(checks),
     )
 
 
@@ -179,37 +183,39 @@ _SEVERITY_LABELS = {
     5: "5-Cosmetic",
 }
 _KIND_LABELS = (("fixed", "Fixed"), ("known", "Known"), ("vulnerability", "취약점"))
+_BUG_VERDICTS = (
+    ("Fixed", "fixed", "Fixed"),
+    ("유효", "known", "Known"),
+    ("미포함", "missing", "미포함"),
+    ("확인 불가", "unknown", "확인 불가"),
+)
 
 
 def _severity_token(text: str) -> str:
     return _SEVERITY_LABELS.get(severity_rank(text) or 0, "")
 
 
-def _issue_filters(modules: list[str], items: list[ReleaseItem]) -> str:
+def _verdict_filter(verdict: str) -> tuple[str, str]:
+    for source, kind, label in _BUG_VERDICTS:
+        if verdict == source:
+            return kind, label
+    return "unknown", "확인 불가"
+
+
+def _filter_controls(
+    modules: list[str],
+    kinds: list[tuple[str, str]],
+    severities: list[str],
+    unknown: bool,
+) -> str:
     module_options = "".join(
         f"<option value='{escape(name)}'>{escape(name)}</option>" for name in modules
     )
-    present = {
-        kind
-        for kind, _title in _KIND_LABELS
-        if any(_in_group(item, kind) for item in items)
-    }
     kind_options = "".join(
-        f"<option value='{kind}'>{escape(title)}</option>"
-        for kind, title in _KIND_LABELS
-        if kind in present
+        f"<option value='{kind}'>{escape(label)}</option>" for kind, label in kinds
     )
-    tokens: list[str] = []
-    unknown = False
-    for item in items:
-        token = _severity_token(item.severity)
-        if not token:
-            unknown = True
-        elif token not in tokens:
-            tokens.append(token)
-    tokens.sort(key=lambda text: severity_rank(text) or 9)
     checks = []
-    for token in tokens:
+    for token in severities:
         value = escape(token)
         checks.append(
             f"<label><input type='checkbox' value='{value}' checked "
@@ -235,6 +241,45 @@ def _issue_filters(modules: list[str], items: list[ReleaseItem]) -> str:
         "<select id='kind' onchange='applyFilters()'>"
         f"<option value=''>전체</option>{kind_options}</select></div>"
     )
+
+
+def _issue_filters(modules: list[str], items: list[ReleaseItem]) -> str:
+    present = {
+        kind
+        for kind, _title in _KIND_LABELS
+        if any(_in_group(item, kind) for item in items)
+    }
+    kinds = [(kind, title) for kind, title in _KIND_LABELS if kind in present]
+    tokens: list[str] = []
+    unknown = False
+    for item in items:
+        token = _severity_token(item.severity)
+        if not token:
+            unknown = True
+        elif token not in tokens:
+            tokens.append(token)
+    tokens.sort(key=lambda text: severity_rank(text) or 9)
+    return _filter_controls(modules, kinds, tokens, unknown)
+
+
+def _bug_filters(checks: list[BugCheck]) -> str:
+    modules = [name for name in MODULES if any(check.module == name for check in checks)]
+    present = {check.verdict for check in checks}
+    kinds = [
+        (kind, label)
+        for verdict, kind, label in _BUG_VERDICTS
+        if verdict in present
+    ]
+    tokens: list[str] = []
+    unknown = False
+    for check in checks:
+        token = _severity_token(check.severity)
+        if not token:
+            unknown = True
+        elif token not in tokens:
+            tokens.append(token)
+    tokens.sort(key=lambda text: severity_rank(text) or 9)
+    return _filter_controls(modules, kinds, tokens, unknown)
 
 
 def _item_row(item: ReleaseItem, module: str, kind: str) -> str:

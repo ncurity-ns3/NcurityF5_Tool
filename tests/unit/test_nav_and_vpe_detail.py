@@ -88,6 +88,68 @@ def test_nav_collapse_persists_and_keeps_the_page() -> None:
         _restore_nav_setting(previous)
 
 
+def _nav_item(window: MainWindow, label: str):
+    for row in range(window.nav.count()):
+        item = window.nav.item(row)
+        if item.text().strip() == label:
+            return item
+    raise AssertionError(label)
+
+
+def _click_nav(window: MainWindow, label: str) -> None:
+    item = _nav_item(window, label)
+    rect = window.nav.visualItemRect(item)
+    QTest.mouseClick(window.nav.viewport(), Qt.MouseButton.LeftButton, pos=rect.center())
+    _app.processEvents()
+
+
+def test_big_sections_collapse_and_keep_the_active_page() -> None:
+    settings = QSettings(ORG_NAME, APP_TITLE)
+    previous = settings.value(_NAV_SETTINGS_KEY)
+    settings.setValue(_NAV_SETTINGS_KEY, False)
+    window = None
+    try:
+        window = MainWindow(_ROOT)
+        window.resize(1140, 800)
+        window.show()
+        _app.processEvents()
+        qkview = _nav_item(window, "정기 점검")
+        logs = _nav_item(window, "Log Search")
+        labels = [window.nav.item(row).text().strip() for row in range(window.nav.count())]
+        assert labels.count("Home") == 1
+        assert labels.count("Initial Setup") == 1
+        assert labels.count("Reports") == 1
+        assert labels.count("Settings") == 1
+        assert window.nav.currentItem().text().strip() == "Home"
+        assert window.nav.currentItem().toolTip() == "접기"
+        assert qkview.isHidden() is True
+        assert logs.isHidden() is True
+
+        _click_nav(window, "Device Check")
+        assert qkview.isHidden() is False
+        assert logs.isHidden() is True
+        assert window.stack.currentIndex() == 0
+
+        _click_nav(window, "트러블슈팅 자료 수집")
+        assert window.stack.currentIndex() == 4
+        assert window.nav.currentItem().text().strip() == "트러블슈팅 자료 수집"
+
+        _click_nav(window, "Device Check")
+        assert qkview.isHidden() is True
+        assert window.stack.currentIndex() == 4
+        assert window.nav.currentItem().text().strip() == "Device Check"
+
+        _click_nav(window, "N-Health")
+        assert logs.isHidden() is False
+        assert qkview.isHidden() is True
+        assert window.nav.currentItem().text().strip() == "Device Check"
+    finally:
+        if window is not None:
+            window.close()
+        _app.processEvents()
+        _restore_nav_setting(previous)
+
+
 def test_nhealth_sits_between_waf_and_initial_setup() -> None:
     settings = QSettings(ORG_NAME, APP_TITLE)
     previous = settings.value(_NAV_SETTINGS_KEY)
@@ -109,7 +171,6 @@ def test_nhealth_sits_between_waf_and_initial_setup() -> None:
             "Release Notes Checker",
             "CVE Vulnerability Checker",
             "Config Viewer",
-            "이슈 분석자료 수집",
             "Log Search",
         ]
         for label, index in labels:
@@ -117,7 +178,6 @@ def test_nhealth_sits_between_waf_and_initial_setup() -> None:
                 "Release Notes Checker",
                 "CVE Vulnerability Checker",
                 "Config Viewer",
-                "이슈 분석자료 수집",
                 "Log Search",
             }:
                 continue

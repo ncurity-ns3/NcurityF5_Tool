@@ -66,7 +66,7 @@ class HomeView(QWidget):
         info_layout.addWidget(
             QLabel(
                 "• <b>Device Check</b> — 정기 점검, OS 업그레이드 간 점검, "
-                "SSL 인증서 확인, 납품확인서 작성<br>"
+                "SSL 인증서 확인, 트러블슈팅 자료 수집, 납품확인서 작성<br>"
                 "• <b>WAF</b> — OWASP Top 10 취약점 공격은 항목별 차단 요약, "
                 "Custom 공격 구문은 직접 전송<br>"
                 "• <b>VPE Viewer</b> — qkview / UCS / bigip.conf의 APM Access Policy 흐름<br>"

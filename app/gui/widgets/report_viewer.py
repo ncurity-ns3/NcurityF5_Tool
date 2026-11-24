@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QUrl
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QDesktopServices
 from PyQt6.QtWidgets import QLabel, QTextBrowser, QVBoxLayout, QWidget
 
 try:
@@ -16,6 +16,7 @@ from app.gui.qt_utils import webengine_available
 
 class ReportViewer(QWidget):
     """QWebEngine must be bootstrapped in app.gui.main before QApplication."""
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._layout = QVBoxLayout(self)
@@ -32,6 +33,8 @@ class ReportViewer(QWidget):
 
             view = QWebEngineView()
             view.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
+            if QWebEnginePage is not None:
+                view.setPage(_ExternalPage(view))
             page = view.page()
             if QWebEnginePage is not None and isinstance(page, QWebEnginePage):
                 page.setBackgroundColor(QColor("#F7F9FC"))
@@ -53,6 +56,9 @@ class ReportViewer(QWidget):
         else:
             self._placeholder.hide()
             browser = QTextBrowser()
+            browser.setOpenLinks(False)
+            browser.setOpenExternalLinks(False)
+            browser.anchorClicked.connect(_open_url)
             browser.setPlaceholderText(
                 "html 미리보기: PyQt6-WebEngine 필요 (개발 PC에서만 pip install)\n"
                 "현장 배포 exe에는 포함 예정"
@@ -73,3 +79,18 @@ class ReportViewer(QWidget):
                 return
         if isinstance(self._view, QTextBrowser):
             self._view.setHtml(path.read_text(encoding="utf-8"))
+
+
+def _open_url(url: QUrl) -> None:
+    QDesktopServices.openUrl(url)
+
+
+if QWebEnginePage is not None:
+
+    class _ExternalPage(QWebEnginePage):
+        def acceptNavigationRequest(self, url, nav_type, is_main_frame) -> bool:
+            clicked = QWebEnginePage.NavigationType.NavigationTypeLinkClicked
+            if nav_type == clicked and url.scheme() in {"http", "https"}:
+                _open_url(url)
+                return False
+            return super().acceptNavigationRequest(url, nav_type, is_main_frame)

@@ -13,6 +13,7 @@ class ReportWindow(QDialog):
 
     def __init__(self, html_path: Path, parent=None, title: str | None = None) -> None:
         super().__init__(parent)
+        enable_window_maximize(self)
         self.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
         self.winId()
@@ -25,3 +26,15 @@ class ReportWindow(QDialog):
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.accept)
         layout.addWidget(close_btn)
+
+
+def enable_window_maximize(window) -> None:
+    """Windows hides Maximize unless Minimize is set on the same window."""
+    window.setWindowFlags(
+        Qt.WindowType.Window
+        | Qt.WindowType.WindowTitleHint
+        | Qt.WindowType.WindowSystemMenuHint
+        | Qt.WindowType.WindowMinimizeButtonHint
+        | Qt.WindowType.WindowMaximizeButtonHint
+        | Qt.WindowType.WindowCloseButtonHint
+    )

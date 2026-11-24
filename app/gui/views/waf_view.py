@@ -31,6 +31,7 @@ from app.gui.theme import (
     mark_step_card,
 )
 from app.gui.widgets.ncurity_checkbox import NcurityCheckBox
+from app.gui.widgets.report_window import enable_window_maximize
 from app.gui.workers.waf_poc_worker import WafPocWorker
 from app.modules.waf_poc.catalog import DEFAULT_YEAR, YEARS, PocCase, cases_for_year
 from app.modules.waf_poc.curlutil import Target
@@ -336,6 +337,7 @@ class WafView(QWidget):
             QMessageBox.information(self, "WAF", "아직 전송 결과가 없습니다.")
             return
         dialog = QDialog(self)
+        enable_window_maximize(dialog)
         dialog.setWindowTitle("OWASP Top 10 취약점 공격 Report")
         dialog.resize(860, 640)
         layout = QVBoxLayout(dialog)
